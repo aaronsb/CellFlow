@@ -193,26 +193,44 @@ export function updateForceTable(initialGeneration = false) {
 }
 
 export function initializeParticles() {
-    particles = new ArrayBuffer(PARTICLE_COUNT * particleStructSize);
-    particleFloats = new Float32Array(particles);
-    particleUints = new Uint32Array(particles);
+    // Crear nuevos arrays para las partículas
+    const newParticles = new ArrayBuffer(PARTICLE_COUNT * particleStructSize);
+    const newParticleFloats = new Float32Array(newParticles);
+    const newParticleUints = new Uint32Array(newParticles);
+    
+    // Inicializar las partículas
     const typeCounts = new Array(numParticleTypes).fill(0);
     for (let i = 0; i < PARTICLE_COUNT; i++) {
         const floatBase = i * 8;
         const uintBase = i * 8;
-        particleFloats[floatBase + 0] = Math.random() * canvasWidth;
-        particleFloats[floatBase + 1] = Math.random() * canvasHeight;
-        particleFloats[floatBase + 2] = 0;
-        particleFloats[floatBase + 3] = 0;
-        particleFloats[floatBase + 4] = 0;
-        particleFloats[floatBase + 5] = 0;
+        
+        // Inicializar posición y velocidad
+        newParticleFloats[floatBase + 0] = Math.random() * canvasWidth; // posX
+        newParticleFloats[floatBase + 1] = Math.random() * canvasHeight; // posY
+        newParticleFloats[floatBase + 2] = 0; // velX
+        newParticleFloats[floatBase + 3] = 0; // velY
+        newParticleFloats[floatBase + 4] = 0; // accX
+        newParticleFloats[floatBase + 5] = 0; // accY
+        
+        // Asignar tipo de partícula
         const ptype = Math.floor(Math.random() * numParticleTypes);
-        particleUints[uintBase + 6] = ptype;
-        particleUints[uintBase + 7] = 0;
+        newParticleUints[uintBase + 6] = ptype; // type
+        newParticleUints[uintBase + 7] = 0; // padding
+        
         typeCounts[ptype]++;
     }
+    
     console.log("Distribución de ptype:", typeCounts);
-    device.queue.writeBuffer(particleBuffer, 0, particles);
+    
+    // Actualizar las referencias globales
+    particles = newParticles;
+    particleFloats = newParticleFloats;
+    particleUints = newParticleUints;
+    
+    // Escribir los datos en el buffer de la GPU
+    if (typeof device !== 'undefined' && particleBuffer) {
+        device.queue.writeBuffer(particleBuffer, 0, particles);
+    }
 }
 
 export function initializeRadioByType() {
@@ -331,32 +349,70 @@ export function renderSimulationFrame() {
 }
 
 // --- Setter functions for external modification ---
-export function setParticleCount(value) {
-    PARTICLE_COUNT = value;
-    particles = new ArrayBuffer(PARTICLE_COUNT * particleStructSize);
-    particleFloats = new Float32Array(particles);
-    particleUints = new Uint32Array(particles);
-    if (typeof device !== 'undefined' && particleBuffer) {
-        particleBuffer.destroy?.();
-        particleBuffer = device.createBuffer({
-            size: particles.byteLength,
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-        });
+export async function setParticleCount(value) {
+    try {
+        PARTICLE_COUNT = value;
+        console.log(`Cambiando número de partículas a: ${PARTICLE_COUNT}`);
+        
+        // Crear nuevos arrays para las partículas
+        const newParticles = new ArrayBuffer(PARTICLE_COUNT * particleStructSize);
+        const newParticleFloats = new Float32Array(newParticles);
+        const newParticleUints = new Uint32Array(newParticles);
+        
+        if (typeof device !== 'undefined') {
+            // Destruir el buffer anterior si existe
+            if (particleBuffer) {
+                particleBuffer.destroy();
+            }
+            
+            // Crear un nuevo buffer sin mapear
+            particleBuffer = device.createBuffer({
+                size: newParticles.byteLength,
+                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+            });
+            
+            // Inicializar las partículas
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                const idx = i * 8;
+                newParticleFloats[idx] = Math.random() * canvasWidth;     // posX
+                newParticleFloats[idx + 1] = Math.random() * canvasHeight; // posY
+                // El resto de los valores ya están inicializados a 0
+                const ptype = Math.floor(Math.random() * numParticleTypes);
+                newParticleUints[idx + 6] = ptype; // type
+            }
+            
+            // Escribir los datos en el buffer de la GPU
+            device.queue.writeBuffer(particleBuffer, 0, newParticles);
+            
+            // Actualizar las referencias globales
+            particles = newParticles;
+            particleFloats = newParticleFloats;
+            particleUints = newParticleUints;
+            
+            // Recrear los buffers de conteo de vecinos
+            previousNeighborCountsBufferA?.destroy?.();
+            previousNeighborCountsBufferB?.destroy?.();
+            
+            previousNeighborCountsBufferA = device.createBuffer({
+                size: PARTICLE_COUNT * 4,
+                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+            });
+            
+            previousNeighborCountsBufferB = device.createBuffer({
+                size: PARTICLE_COUNT * 4,
+                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+            });
+            
+            // Recrear los pipelines para asegurar que todo esté sincronizado
+            createPipelines();
+            
+            console.log(`Número de partículas actualizado a: ${PARTICLE_COUNT}`);
+        }
+    } catch (error) {
+        console.error('Error en setParticleCount:', error);
     }
-    // Recreate the neighbor count buffers
-    if (typeof device !== 'undefined') {
-        previousNeighborCountsBufferA?.destroy?.();
-        previousNeighborCountsBufferB?.destroy?.();
-        previousNeighborCountsBufferA = device.createBuffer({
-            size: PARTICLE_COUNT * 4,
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-        });
-        previousNeighborCountsBufferB = device.createBuffer({
-            size: PARTICLE_COUNT * 4,
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-        });
-        useBufferAasInput = true;
-    }
+    // Los buffers de conteo de vecinos ya se recrearon más arriba
+    useBufferAasInput = true;
 }
 
 export function setNumParticleTypes(value) {
@@ -421,84 +477,143 @@ export function getCurrentParams() {
 
 // Función para mover todas las partículas y aplicar wrapping
 export async function moveUniverse(direction) {
+    if (!device || !particleBuffer) return;
+    
+    try {
+        // Asegurarse de que el tamaño del buffer sea correcto
+        const expectedBufferSize = PARTICLE_COUNT * particleStructSize;
+        if (particles.byteLength !== expectedBufferSize) {
+            console.warn(`Tamaño de buffer incorrecto. Esperado: ${expectedBufferSize}, Actual: ${particles.byteLength}. Actualizando...`);
+            await updateParticleBufferSize();
+            return; // Salir y esperar al siguiente frame
+        }
+        
+        // Leer las partículas actuales de la GPU
+        const gpuBuffer = device.createBuffer({
+            size: expectedBufferSize,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+        });
+        
+        // Copiar los datos de partículas a un buffer mapeable
+        const commandEncoder = device.createCommandEncoder();
+        commandEncoder.copyBufferToBuffer(
+            particleBuffer,
+            0,
+            gpuBuffer,
+            0,
+            expectedBufferSize
+        );
+        
+        device.queue.submit([commandEncoder.finish()]);
+        
+        // Esperar a que los datos estén disponibles
+        await gpuBuffer.mapAsync(GPUMapMode.READ);
+        const arrayBuffer = gpuBuffer.getMappedRange();
+        const currentParticles = new Float32Array(arrayBuffer);
+        
+        // Aplicar el desplazamiento
+        const dx = direction === 'ArrowLeft' ? -wrappingMovement : (direction === 'ArrowRight' ? wrappingMovement : 0);
+        const dy = direction === 'ArrowUp' ? -wrappingMovement : (direction === 'ArrowDown' ? wrappingMovement : 0);
+        
+        // Crear un nuevo array para las partículas modificadas
+        const newParticles = new Float32Array(PARTICLE_COUNT * 8);
+        
+        // Asegurarse de que tenemos suficientes datos
+        const maxSafeIndex = Math.min(currentParticles.length, newParticles.length);
+        const maxParticles = Math.floor(maxSafeIndex / 8);
+        
+        // Aplicar el desplazamiento a cada partícula
+        for (let i = 0; i < maxParticles; i++) {
+            const srcIdx = i * 8;
+            const dstIdx = i * 8;
+            
+            // Copiar los datos existentes
+            for (let j = 0; j < 8; j++) {
+                if (srcIdx + j < currentParticles.length) {
+                    newParticles[dstIdx + j] = currentParticles[srcIdx + j];
+                }
+            }
+            
+            // Aplicar desplazamiento solo a las posiciones X e Y
+            let newX = newParticles[dstIdx] + dx;
+            let newY = newParticles[dstIdx + 1] + dy;
+            
+            // Aplicar wrapping
+            if (newX < 0) newX += canvasWidth;
+            if (newX >= canvasWidth) newX -= canvasWidth;
+            if (newY < 0) newY += canvasHeight;
+            if (newY >= canvasHeight) newY -= canvasHeight;
+            
+            // Actualizar posiciones
+            newParticles[dstIdx] = newX;
+            newParticles[dstIdx + 1] = newY;
+        }
+        
+        // Desmapear el buffer
+        gpuBuffer.unmap();
+        gpuBuffer.destroy();
+        
+        // Actualizar las referencias locales
+        particles = newParticles.buffer;
+        particleFloats = newParticles;
+        particleUints = new Uint32Array(particles);
+        
+        // Escribir las partículas modificadas de vuelta al buffer principal
+        device.queue.writeBuffer(particleBuffer, 0, particles);
+        
+    } catch (error) {
+        console.error('Error en moveUniverse:', error);
+        // En caso de error, intentar reinicializar las partículas
+        try {
+            await updateParticleBufferSize();
+        } catch (e) {
+            console.error('Error al actualizar el buffer de partículas:', e);
+        }
+    }
+}
+
+// Función auxiliar para actualizar el tamaño del buffer de partículas
+async function updateParticleBufferSize() {
     if (!device) return;
     
-    // Leer las partículas actuales de la GPU
-    const gpuBuffer = device.createBuffer({
-        size: particles.byteLength,
-        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
-    });
+    // Crear un nuevo buffer con el tamaño correcto
+    const newParticles = new ArrayBuffer(PARTICLE_COUNT * particleStructSize);
+    const newParticleFloats = new Float32Array(newParticles);
+    const newParticleUints = new Uint32Array(newParticles);
     
-    // Copiar los datos de partículas a un buffer mapeable
-    const commandEncoder = device.createCommandEncoder();
-    commandEncoder.copyBufferToBuffer(
-        particleBuffer,
-        0,
-        gpuBuffer,
-        0,
-        particles.byteLength
-    );
-    
-    device.queue.submit([commandEncoder.finish()]);
-    
-    // Esperar a que los datos estén disponibles
-    await gpuBuffer.mapAsync(GPUMapMode.READ);
-    const arrayBuffer = gpuBuffer.getMappedRange();
-    const currentParticles = new Float32Array(arrayBuffer);
-    
-    // Aplicar el desplazamiento
-    const dx = direction === 'ArrowLeft' ? -wrappingMovement : (direction === 'ArrowRight' ? wrappingMovement : 0);
-    const dy = direction === 'ArrowUp' ? -wrappingMovement : (direction === 'ArrowDown' ? wrappingMovement : 0);
-    
-    // Crear un nuevo array para las partículas modificadas
-    const newParticles = new Float32Array(currentParticles);
-    
-    // Aplicar el desplazamiento a cada partícula
+    // Inicializar las partículas
     for (let i = 0; i < PARTICLE_COUNT; i++) {
         const idx = i * 8; // Cada partícula ocupa 8 floats
         
-        // Aplicar desplazamiento
-        let newX = currentParticles[idx] + dx;
-        let newY = currentParticles[idx + 1] + dy;
-        
-        // Aplicar wrapping
-        if (newX < 0) newX += canvasWidth;
-        if (newX >= canvasWidth) newX -= canvasWidth;
-        if (newY < 0) newY += canvasHeight;
-        if (newY >= canvasHeight) newY -= canvasHeight;
-        
-        // Actualizar posiciones
-        newParticles[idx] = newX;
-        newParticles[idx + 1] = newY;
+        // Inicializar las posiciones
+        newParticleFloats[idx] = Math.random() * canvasWidth;     // posX
+        newParticleFloats[idx + 1] = Math.random() * canvasHeight; // posY
+        // El resto de los valores ya están inicializados a 0
     }
     
-    // Desmapear el buffer
-    gpuBuffer.unmap();
+    // Destruir el buffer anterior si existe
+    if (particleBuffer) {
+        particleBuffer.destroy();
+    }
     
-    // Crear un nuevo buffer de staging para subir los datos
-    const stagingBuffer = device.createBuffer({
+    // Crear un nuevo buffer en la GPU
+    particleBuffer = device.createBuffer({
         size: newParticles.byteLength,
-        usage: GPUBufferUsage.COPY_SRC,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
         mappedAtCreation: true
     });
     
-    // Copiar los datos al buffer de staging
-    new Float32Array(stagingBuffer.getMappedRange()).set(newParticles);
-    stagingBuffer.unmap();
+    // Copiar los datos al nuevo buffer
+    new Float32Array(particleBuffer.getMappedRange()).set(newParticleFloats);
+    particleBuffer.unmap();
     
-    // Copiar los datos al buffer de partículas
-    const copyEncoder = device.createCommandEncoder();
-    copyEncoder.copyBufferToBuffer(
-        stagingBuffer,
-        0,
-        particleBuffer,
-        0,
-        newParticles.byteLength
-    );
+    // Actualizar las referencias globales
+    particles = newParticles;
+    particleFloats = newParticleFloats;
+    particleUints = newParticleUints;
     
-    device.queue.submit([copyEncoder.finish()]);
+    console.log(`Buffer de partículas actualizado a ${PARTICLE_COUNT} partículas`);
     
-    // Liberar recursos
-    stagingBuffer.destroy();
-    gpuBuffer.destroy();
+    // Recrear los pipelines para asegurar que todo esté sincronizado
+    createPipelines();
 }
