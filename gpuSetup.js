@@ -8,6 +8,8 @@ export let PARTICLE_COUNT = 4000;
 export let numParticleTypes = 6;
 export let radius = 50.0;
 export let delta_t = 0.22;
+export let wrappingMovement = 10;
+
 export let friction = 0.71;
 export let repulsion = 50.0;
 export let attraction = 0.62;
@@ -38,6 +40,10 @@ let simPipeline;
 let simBindGroup;
 let renderPipeline;
 let renderBindGroup;
+
+let previousNeighborCountsBufferA;
+let previousNeighborCountsBufferB;
+let useBufferAasInput = true;
 
 // Almacena los valores brutos y aleatorios que luego se transformarán
 export let rawForceTableValues = new Float32Array(numParticleTypes * numParticleTypes);
@@ -123,9 +129,15 @@ export async function setupWebGPU(canvasId) {
     // Buffers iniciales
     particleBuffer = device.createBuffer({
         size: particles.byteLength,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+        mappedAtCreation: true
     });
-
+    
+    // Mapear y copiar datos iniciales
+    new Float32Array(particleBuffer.getMappedRange()).set(particleFloats);
+    particleBuffer.unmap();
+    
+    // Buffer para la tabla de fuerzas
     forceTableBuffer = device.createBuffer({
         size: numParticleTypes * numParticleTypes * 4, // Tamaño inicial
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
@@ -142,6 +154,17 @@ export async function setupWebGPU(canvasId) {
         size: numParticleTypes * 4,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
+
+    // --- Neighbor count buffers for ping-pong ---
+    previousNeighborCountsBufferA = device.createBuffer({
+        size: PARTICLE_COUNT * 4,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+    });
+    previousNeighborCountsBufferB = device.createBuffer({
+        size: PARTICLE_COUNT * 4,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+    });
+    useBufferAasInput = true;
 
     initializeParticles();
     updateForceTable(true);
@@ -238,6 +261,7 @@ export function createPipelines() {
             { binding: 1, resource: { buffer: forceTableBuffer } },
             { binding: 2, resource: { buffer: simParamsBuffer } },
             { binding: 3, resource: { buffer: radioByTypeBuffer } },
+            { binding: 4, resource: { buffer: useBufferAasInput ? previousNeighborCountsBufferA : previousNeighborCountsBufferB } },
         ],
     });
 
@@ -275,6 +299,20 @@ export function renderSimulationFrame() {
     computePass.dispatchWorkgroups(Math.ceil(PARTICLE_COUNT / 64));
     computePass.end();
 
+    // Swap the neighbor count buffers for next frame
+    useBufferAasInput = !useBufferAasInput;
+    // Re-create the bind group with the swapped buffer
+    simBindGroup = device.createBindGroup({
+        layout: simPipeline.getBindGroupLayout(0),
+        entries: [
+            { binding: 0, resource: { buffer: particleBuffer } },
+            { binding: 1, resource: { buffer: forceTableBuffer } },
+            { binding: 2, resource: { buffer: simParamsBuffer } },
+            { binding: 3, resource: { buffer: radioByTypeBuffer } },
+            { binding: 4, resource: { buffer: useBufferAasInput ? previousNeighborCountsBufferA : previousNeighborCountsBufferB } },
+        ],
+    });
+
     const renderPass = encoder.beginRenderPass({
         colorAttachments: [
             {
@@ -304,6 +342,20 @@ export function setParticleCount(value) {
             size: particles.byteLength,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
         });
+    }
+    // Recreate the neighbor count buffers
+    if (typeof device !== 'undefined') {
+        previousNeighborCountsBufferA?.destroy?.();
+        previousNeighborCountsBufferB?.destroy?.();
+        previousNeighborCountsBufferA = device.createBuffer({
+            size: PARTICLE_COUNT * 4,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+        });
+        previousNeighborCountsBufferB = device.createBuffer({
+            size: PARTICLE_COUNT * 4,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+        });
+        useBufferAasInput = true;
     }
 }
 
@@ -346,6 +398,7 @@ export function setCanvasDimensions(width, height) {
 
 export function getCurrentParams() {
     return {
+        PARTICLE_COUNT,
         numParticleTypes,
         radius,
         delta_t,
@@ -364,4 +417,88 @@ export function getCurrentParams() {
         rawForceTableValues: Array.from(rawForceTableValues),
         radioByType: Array.from(radioByType)
     };
+}
+
+// Función para mover todas las partículas y aplicar wrapping
+export async function moveUniverse(direction) {
+    if (!device) return;
+    
+    // Leer las partículas actuales de la GPU
+    const gpuBuffer = device.createBuffer({
+        size: particles.byteLength,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+    });
+    
+    // Copiar los datos de partículas a un buffer mapeable
+    const commandEncoder = device.createCommandEncoder();
+    commandEncoder.copyBufferToBuffer(
+        particleBuffer,
+        0,
+        gpuBuffer,
+        0,
+        particles.byteLength
+    );
+    
+    device.queue.submit([commandEncoder.finish()]);
+    
+    // Esperar a que los datos estén disponibles
+    await gpuBuffer.mapAsync(GPUMapMode.READ);
+    const arrayBuffer = gpuBuffer.getMappedRange();
+    const currentParticles = new Float32Array(arrayBuffer);
+    
+    // Aplicar el desplazamiento
+    const dx = direction === 'ArrowLeft' ? -wrappingMovement : (direction === 'ArrowRight' ? wrappingMovement : 0);
+    const dy = direction === 'ArrowUp' ? -wrappingMovement : (direction === 'ArrowDown' ? wrappingMovement : 0);
+    
+    // Crear un nuevo array para las partículas modificadas
+    const newParticles = new Float32Array(currentParticles);
+    
+    // Aplicar el desplazamiento a cada partícula
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const idx = i * 8; // Cada partícula ocupa 8 floats
+        
+        // Aplicar desplazamiento
+        let newX = currentParticles[idx] + dx;
+        let newY = currentParticles[idx + 1] + dy;
+        
+        // Aplicar wrapping
+        if (newX < 0) newX += canvasWidth;
+        if (newX >= canvasWidth) newX -= canvasWidth;
+        if (newY < 0) newY += canvasHeight;
+        if (newY >= canvasHeight) newY -= canvasHeight;
+        
+        // Actualizar posiciones
+        newParticles[idx] = newX;
+        newParticles[idx + 1] = newY;
+    }
+    
+    // Desmapear el buffer
+    gpuBuffer.unmap();
+    
+    // Crear un nuevo buffer de staging para subir los datos
+    const stagingBuffer = device.createBuffer({
+        size: newParticles.byteLength,
+        usage: GPUBufferUsage.COPY_SRC,
+        mappedAtCreation: true
+    });
+    
+    // Copiar los datos al buffer de staging
+    new Float32Array(stagingBuffer.getMappedRange()).set(newParticles);
+    stagingBuffer.unmap();
+    
+    // Copiar los datos al buffer de partículas
+    const copyEncoder = device.createCommandEncoder();
+    copyEncoder.copyBufferToBuffer(
+        stagingBuffer,
+        0,
+        particleBuffer,
+        0,
+        newParticles.byteLength
+    );
+    
+    device.queue.submit([copyEncoder.finish()]);
+    
+    // Liberar recursos
+    stagingBuffer.destroy();
+    gpuBuffer.destroy();
 }

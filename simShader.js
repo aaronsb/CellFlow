@@ -29,6 +29,7 @@ struct SimParams {
 @group(0) @binding(1) var<storage, read> forceTable: array<f32>;
 @group(0) @binding(2) var<uniform> simParams: SimParams;
 @group(0) @binding(3) var<storage, read> radioByType: array<f32>;
+@group(0) @binding(4) var<storage, read_write> previousFrameNeighborCounts: array<u32>;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) id: vec3u) {
@@ -73,9 +74,9 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   }
 
 
-  let normalized_density = f32(neighbors_count) / simParams.maxExpectedNeighbors;
-
-
+  // Use previous frame's neighbor count for adaptive_multiplier
+  let prev_neighbors = previousFrameNeighborCounts[i];
+  let normalized_density = f32(prev_neighbors) / simParams.maxExpectedNeighbors;
   let clamped_normalized_density = clamp(normalized_density, 0.0, 1.0);
 
   // Calcula min_force_mult y max_force_mult basándose en simParams.forceMultiplier
@@ -87,6 +88,9 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let adaptive_multiplier = mix(max_force_mult, min_force_mult, clamped_normalized_density);
   var vel = me.vel * simParams.friction;
   vel += force * simParams.delta_t * adaptive_multiplier;
+
+  // At the end of the main, store this frame's neighbor count for use in the next frame
+  previousFrameNeighborCounts[i] = neighbors_count;
 
 
   // **Estrategia 2: Aumentar la repulsión en clústeres densos**

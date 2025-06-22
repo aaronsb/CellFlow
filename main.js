@@ -41,6 +41,10 @@ const forceOffsetValueSpan = document.getElementById('force-offset-value');
 
 const regenButton = document.getElementById('regen-button');
 const resetButton = document.getElementById('reset-button');
+const rexButton = document.getElementById('rex-button');
+
+// Variable global para el desplazamiento con las flechas
+export let wrappingMovement = 10;
 
 const startBtn = document.getElementById('start-recording');
 const stopBtn = document.getElementById('stop-recording');
@@ -93,6 +97,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (key === ' ' || key === 'Spacebar') {
         event.preventDefault();
         regenButton.click();
+        return;
+    }
+    // Tecla X: rotar valores de radio
+    if (key === 'x' || key === 'X') {
+        event.preventDefault();
+        rexButton.click();
+        return;
+    }
+    // Flechas del teclado: mover el universo
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(key)) {
+        event.preventDefault();
+        GPU.moveUniverse(key);
         return;
     }
     // Tecla C: expandir/contraer menú de controles
@@ -353,6 +369,15 @@ function addEventListeners() {
         GPU.initializeRadioByType();
     });
 
+    rexButton.addEventListener('click', () => {
+        // Rotar los valores de radioByType
+        const rotatedRadios = new Float32Array(GPU.radioByType.length);
+        for (let i = 0; i < GPU.radioByType.length; i++) {
+            rotatedRadios[i] = GPU.radioByType[(i + 1) % GPU.radioByType.length];
+        }
+        GPU.setRadioByType(rotatedRadios);
+    });
+
     resetButton.addEventListener('click', () => {
         GPU.initializeParticles();
     });
@@ -397,92 +422,7 @@ function addEventListeners() {
         reader.onload = function (e) {
             try {
                 const params = JSON.parse(e.target.result);
-                if (typeof params.numParticleTypes === 'number') {
-                    GPU.setNumParticleTypes(params.numParticleTypes);
-                    numTypesSlider.value = GPU.numParticleTypes;
-                    numTypesValueSpan.textContent = GPU.numParticleTypes;
-                }
-                if (typeof params.radius === 'number') {
-                    GPU.setRadius(params.radius);
-                    radiusSlider.value = GPU.radius;
-                    radiusValueSpan.textContent = GPU.radius.toFixed(1);
-                }
-                if (typeof params.delta_t === 'number') {
-                    GPU.setDeltaT(params.delta_t);
-                    deltaTSlider.value = GPU.delta_t;
-                    deltaTValueSpan.textContent = GPU.delta_t.toFixed(2);
-                }
-                if (typeof params.friction === 'number') {
-                    GPU.setFriction(params.friction);
-                    frictionSlider.value = GPU.friction;
-                    frictionValueSpan.textContent = GPU.friction.toFixed(2);
-                }
-                if (typeof params.repulsion === 'number') {
-                    GPU.setRepulsion(params.repulsion);
-                    repulsionSlider.value = GPU.repulsion;
-                    repulsionValueSpan.textContent = GPU.repulsion.toFixed(2);
-                }
-                if (typeof params.attraction === 'number') {
-                    GPU.setAttraction(params.attraction);
-                    attractionSlider.value = GPU.attraction;
-                    attractionValueSpan.textContent = GPU.attraction.toFixed(2);
-                }
-                if (typeof params.k === 'number') {
-                    GPU.setK(params.k);
-                    kSlider.value = GPU.k;
-                    kValueSpan.textContent = GPU.k.toFixed(2);
-                }
-                if (typeof params.forceRange === 'number') {
-                    GPU.setForceRange(params.forceRange);
-                    forceRangeSlider.value = GPU.forceRange;
-                    forceRangeValueSpan.textContent = GPU.forceRange.toFixed(2);
-                }
-                if (typeof params.forceBias === 'number') {
-                    GPU.setForceBias(params.forceBias);
-                    forceBiasSlider.value = GPU.forceBias;
-                    forceBiasValueSpan.textContent = GPU.forceBias.toFixed(2);
-                }
-                if (typeof params.ratio === 'number') {
-                    GPU.setRatio(params.ratio);
-                    ratioSlider.value = GPU.ratio;
-                    ratioValueSpan.textContent = GPU.ratio.toFixed(2);
-                }
-                if (typeof params.lfoA === 'number') {
-                    GPU.setLfoA(params.lfoA);
-                    lfoASlider.value = GPU.lfoA;
-                    lfoAValueSpan.textContent = GPU.lfoA.toFixed(2);
-                }
-                if (typeof params.lfoS === 'number') {
-                    GPU.setLfoS(params.lfoS);
-                    lfoSSlider.value = GPU.lfoS;
-                    lfoSValueSpan.textContent = GPU.lfoS.toFixed(2);
-                }
-                if (typeof params.forceMultiplier === 'number') {
-                    GPU.setForceMultiplier(params.forceMultiplier);
-                    forceMultiplierSlider.value = GPU.forceMultiplier;
-                    forceMultiplierValueSpan.textContent = GPU.forceMultiplier.toFixed(2);
-                }
-                if (typeof params.balance === 'number') {
-                    GPU.setBalance(params.balance);
-                    balanceSlider.value = GPU.balance;
-                    balanceValueSpan.textContent = GPU.balance.toFixed(3);
-                }
-                if (typeof params.forceOffset === 'number') {
-                    GPU.setForceOffset(params.forceOffset);
-                    forceOffsetSlider.value = GPU.forceOffset;
-                    forceOffsetValueSpan.textContent = GPU.forceOffset.toFixed(2);
-                }
-
-                if (Array.isArray(params.rawForceTableValues)) {
-                    GPU.setRawForceTableValues(new Float32Array(params.rawForceTableValues));
-                    GPU.updateForceTable(false);
-                }
-                if (Array.isArray(params.radioByType)) {
-                    GPU.setRadioByType(new Float32Array(params.radioByType));
-                    GPU.initializeRadioByType();
-                }
-                GPU.createPipelines();
-                GPU.updateSimParamsBuffer();
+                applyParams(params);
             } catch (err) {
                 alert('Error loading parameters: ' + err);
             }

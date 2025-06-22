@@ -2,6 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="mobile-web-app-capable" content="yes">
     <title>CELL FLOW</title>
     <link rel="stylesheet" href="style.css" />
     <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
@@ -12,18 +13,19 @@
       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px;">
   <button @click="open = !open" style="background: #222; color: #fff; border: none; padding: 8px 18px; border-radius: 4px; cursor: pointer; font-size: 1em;">Controls <span x-text="open ? '▲' : '▼'"></span></button>
   <div style="position: relative;">
-    <button id="help-btn" style="background:#444; color:#fff; border:none; padding:6px 18px; border-radius:4px; cursor:pointer; font-size:1em;" @mouseenter="document.getElementById('help-tooltip').style.display = 'block'" @mouseleave="document.getElementById('help-tooltip').style.display = 'none'">Help</button>
+    <button id="help-btn" style="background:#444; color:#fff; border:none; padding:6px 18px; border-radius:4px; cursor:pointer; font-size:1em;" @mouseenter="document.getElementById('help-tooltip').style.display = 'block'" @mouseleave="document.getElementById('help-tooltip').style.display = 'none'">?</button>
     <div id="help-tooltip" style="display:none; position:absolute; top:110%; left:50%; transform:translateX(-50%); background:rgba(30,30,30,0.98); color:#fff; z-index:100; border-radius:16px; padding:32px 40px; box-shadow:0 2px 16px #000; min-width:320px; max-width:480px; text-align:center; font-size:1.08em;">
       <h2 style="margin-top:0;">Keyboard Shortcuts</h2>
       <ul style="list-style:none; padding:0; margin:0 0 16px 0; text-align:left;">
-        <li><b>1-8</b>: Load preset 1-8</li>
-        <li><b>Space</b>: Regenerate force matrix</li>
-        <li><b>C</b>: Expand/collapse controls menu</li>
+        <li><b>1-8</b> Load preset 1-8</li>
+        <li><b>Space</b> Regenerate force matrix</li>
+        <li><b>X</b> Cycle radious (ratio mus be non zero)</li>
+        <li><b>C</b> Expand/collapse controls menu</li>
       </ul>
       <div style="font-size:0.95em; color:#ccc; text-align:left;">
-        <b></b> You can use the mouse wheel to finetune the sliders<br>
+        <b></b>Use the mouse wheel to finetune the sliders<br>
         <b></b> <br>
-        <b></b>: You can zoom in/out the browser view with control plus + and - keys
+        <b></b>You can zoom in/out the browser view with control plus + and - keys
       </div>
       <div style="margin-top:18px; font-size:0.9em; color:#aaa;">(Move your mouse away from the Help button to hide this message)</div>
     </div>
@@ -226,6 +228,7 @@
       <div style="display: flex; gap: 8px;">
         <button id="regen-button" style="flex: 1;">REGEN</button>
         <button id="reset-button" style="flex: 1;">RESET</button>
+        <button id="rex-button" style="flex: 1;">reX</button>
       </div>
       <div style="display: flex; gap: 8px; margin-top: 8px;">
         <button id="save-params-button" style="flex: 1;">Save</button>
