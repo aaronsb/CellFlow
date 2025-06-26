@@ -4,8 +4,9 @@
 #include <QMainWindow>
 #include <QSlider>
 #include <QLabel>
-#include <QSpinBox>
-#include <QDoubleSpinBox>
+#include <QLineEdit>
+#include <QDoubleValidator>
+#include <QIntValidator>
 #include <QPushButton>
 #include <QGroupBox>
 #include <memory>
@@ -19,8 +20,8 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
 
 private slots:
-    void onParticleCountChanged(int value);
-    void onParticleTypesChanged(int value);
+    void onParticleCountConfirmed();
+    void onParticleTypesConfirmed();
     void onRadiusChanged(int value);
     void onDeltaTChanged(int value);
     void onFrictionChanged(int value);
@@ -52,15 +53,15 @@ private slots:
 private:
     void setupUI();
     QWidget* createControlGroup(const QString& label, QSlider*& slider, 
-                               QLabel*& valueLabel, double min, double max, 
+                               QLineEdit*& valueEdit, double min, double max, 
                                double value, double step = 0.01);
-    void updateSliderValue(QSlider* slider, QLabel* label, double value, int decimals = 2);
+    void connectSliderAndEdit(QSlider* slider, QLineEdit* edit, double min, double step);
     
     CellFlowWidget* cellFlowWidget;
     
     // Control widgets
-    QSpinBox* particleCountSpinBox;
-    QSpinBox* particleTypesSpinBox;
+    QLineEdit* particleCountEdit;
+    QLineEdit* particleTypesEdit;
     
     QSlider* radiusSlider;
     QSlider* deltaTSlider;
@@ -78,22 +79,22 @@ private:
     QSlider* forceOffsetSlider;
     QSlider* pointSizeSlider;
     
-    // Value labels
-    QLabel* radiusLabel;
-    QLabel* deltaTLabel;
-    QLabel* frictionLabel;
-    QLabel* repulsionLabel;
-    QLabel* attractionLabel;
-    QLabel* kLabel;
-    QLabel* balanceLabel;
-    QLabel* forceMultiplierLabel;
-    QLabel* forceRangeLabel;
-    QLabel* forceBiasLabel;
-    QLabel* ratioLabel;
-    QLabel* lfoALabel;
-    QLabel* lfoSLabel;
-    QLabel* forceOffsetLabel;
-    QLabel* pointSizeLabel;
+    // Value edits
+    QLineEdit* radiusEdit;
+    QLineEdit* deltaTEdit;
+    QLineEdit* frictionEdit;
+    QLineEdit* repulsionEdit;
+    QLineEdit* attractionEdit;
+    QLineEdit* kEdit;
+    QLineEdit* balanceEdit;
+    QLineEdit* forceMultiplierEdit;
+    QLineEdit* forceRangeEdit;
+    QLineEdit* forceBiasEdit;
+    QLineEdit* ratioEdit;
+    QLineEdit* lfoAEdit;
+    QLineEdit* lfoSEdit;
+    QLineEdit* forceOffsetEdit;
+    QLineEdit* pointSizeEdit;
     
     QLabel* fpsLabel;
     QLabel* incrementLabel;

@@ -337,6 +337,10 @@ void CellFlowWidget::setNumParticleTypes(int types) {
     simulation->setNumParticleTypes(types);
 }
 
+int CellFlowWidget::getParticleCount() const {
+    return simulation->getParticleCount();
+}
+
 void CellFlowWidget::setRadius(float value) { params.radius = value; }
 void CellFlowWidget::setDeltaT(float value) { params.delta_t = value; }
 void CellFlowWidget::setFriction(float value) { params.friction = value; }

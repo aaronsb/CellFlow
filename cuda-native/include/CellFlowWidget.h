@@ -46,6 +46,7 @@ public:
     
     // Get current parameters
     const SimulationParams& getParams() const { return params; }
+    int getParticleCount() const;
     
     // Load/Save presets
     bool loadPreset(const QString& filename);
