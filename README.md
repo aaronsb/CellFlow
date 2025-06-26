@@ -1,5 +1,6 @@
 # CellFlow
 
+**🚀 CUDA Native: 100,000 particles @ 13 FPS**
 ![CellFlow CUDA - 100,000 particles at 13 FPS](docs/media/Screenshot_20250626_121558.png)
 
 CellFlow is a novel particle simulation algorithm that exhibits emergent behaviors resembling life - from single-cell organisms to ecosystems like coral reefs, and occasionally even planetary or galactic formations. The system builds upon foundational concepts from Clusters by Jeffrey Ventrella and Particle Life by Tom Mohr, introducing significant algorithmic improvements for more organic and complex behaviors.
@@ -38,7 +39,9 @@ CellFlow is released as open source to encourage learning, experimentation, and 
 
 ## Performance Screenshots
 
-### CUDA Native Version - 69,500 particles at 30 FPS
+### 🎯 Optimal Performance: 69,500 particles @ 30 FPS
+> **CUDA Native** | RTX 4060 Ti | Qt6/Wayland | Real-time interaction
+
 ![CellFlow CUDA - 69,500 particles at 30 FPS](docs/media/Screenshot_20250626_121802.png)
 
 ## CUDA Native Implementation
