@@ -15,9 +15,7 @@ int main(int argc, char* argv[]) {
     format.setSwapInterval(1); // VSync
     QSurfaceFormat::setDefaultFormat(format);
     
-    // Enable high DPI scaling
-    app.setAttribute(Qt::AA_EnableHighDpiScaling);
-    app.setAttribute(Qt::AA_UseHighDpiPixmaps);
+    // High DPI is enabled by default in Qt6
     
     // Set application info
     app.setApplicationName("CellFlow CUDA");

@@ -31,14 +31,12 @@ set(SOURCES
     src/MainWindow.cpp
     src/CellFlowWidget.cpp
     src/ParticleSimulation.cu
-    src/ParticleRenderer.cpp
 )
 
 set(HEADERS
     include/MainWindow.h
     include/CellFlowWidget.h
     include/ParticleSimulation.cuh
-    include/ParticleRenderer.h
     include/SimulationParams.h
 )
 
