@@ -1,9 +1,11 @@
 export function getRenderShaderCode(numParticleTypes, canvasWidth, canvasHeight, particleColors) {
-  let colorAssignments = '';
+  // Build color array as a constant in the shader for better performance
+  let colorArray = 'const particleColors = array<vec3f, ' + numParticleTypes + '>(';
   for (let i = 0; i < numParticleTypes; i++) {
-    colorAssignments += `          if (p.ptype == ${i}u) { c = ${particleColors[i]}; }\n`;
+    colorArray += particleColors[i];
+    if (i < numParticleTypes - 1) colorArray += ', ';
   }
-  colorAssignments += `          if (p.ptype >= ${numParticleTypes}u) { c = vec3f(1.0, 1.0, 0.0); } // Amarillo para tipos fuera de rango\n`;
+  colorArray += ');';
 
   return `
     struct Particle {
@@ -16,6 +18,8 @@ export function getRenderShaderCode(numParticleTypes, canvasWidth, canvasHeight,
 
     @group(0) @binding(0) var<storage, read> particles: array<Particle>;
 
+    ${colorArray}
+
     struct VSOut {
       @builtin(position) pos: vec4f,
       @location(0) color: vec3f
@@ -27,8 +31,14 @@ export function getRenderShaderCode(numParticleTypes, canvasWidth, canvasHeight,
       let particleIndex = i / 4u;
       let subIndex = i % 4u;
       let p = particles[particleIndex];
-      var c = vec3f(0.5); // Gris por defecto
-${colorAssignments}
+      
+      // Use array lookup instead of if statements
+      var c: vec3f;
+      if (p.ptype < ${numParticleTypes}u) {
+        c = particleColors[p.ptype];
+      } else {
+        c = vec3f(1.0, 1.0, 0.0); // Amarillo para tipos fuera de rango
+      }
 
       // Definir offsets para los 4 píxeles (en píxeles)
       var offset: vec2f;

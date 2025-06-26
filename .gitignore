@@ -23,3 +23,12 @@ yarn-error.log*
 
 # TypeScript cache
 *.tsbuildinfo
+
+# CUDA/C++ build artifacts
+cuda-native/build/
+cuda-native/test-cuda
+*.o
+*.cu.o
+*.a
+*.so
+*.exe

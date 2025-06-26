@@ -33,3 +33,14 @@ For detailed algorithm explanations and implementation details, see: https://www
 ## Open Source
 
 CellFlow is released as open source to encourage learning, experimentation, and community contributions. The codebase includes implementations in multiple languages and comprehensive parameter controls for exploring emergent behaviors.
+
+## CUDA Native Implementation
+
+A high-performance CUDA implementation is available in the `cuda-native/` directory, offering:
+- **12-17x performance improvement** over WebGPU
+- Support for **100,000+ particles** in real-time
+- Native Qt6 interface for Linux/Wayland
+- See [cuda-native/README.md](cuda-native/README.md) for details
+
+### Performance Demo
+[![CellFlow CUDA 100k Particles](https://img.youtube.com/vi/ZMKAkzZCcAk/maxresdefault.jpg)](https://youtu.be/ZMKAkzZCcAk)

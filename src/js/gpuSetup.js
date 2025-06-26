@@ -26,6 +26,9 @@ export let forceOffset = 1.0;
 export let canvasWidth = window.innerWidth;
 export let canvasHeight = window.innerHeight;
 
+// Track when parameters need updating
+let paramsNeedUpdate = true;
+
 let adapter;
 let device;
 let context;
@@ -37,9 +40,15 @@ let radioByTypeBuffer;
 
 let simModule;
 let simPipeline;
-let simBindGroup;
+let simBindGroupA;
+let simBindGroupB;
+let renderModule;
 let renderPipeline;
 let renderBindGroup;
+
+// Cache for shader code to avoid recreation
+let cachedSimShaderCode = null;
+let cachedRenderShaderCode = null;
 
 let previousNeighborCountsBufferA;
 let previousNeighborCountsBufferB;
@@ -241,7 +250,12 @@ export function initializeRadioByType() {
     device.queue.writeBuffer(radioByTypeBuffer, 0, radioByType);
 }
 
-export function updateSimParamsBuffer() {
+export function updateSimParamsBuffer(forceUpdate = false) {
+    // Only update if parameters changed or LFO is active
+    if (!paramsNeedUpdate && lfoA === 0 && !forceUpdate) {
+        return;
+    }
+    
     const t = performance.now() / 1000;
     const lfo = lfoA * Math.sin(2 * Math.PI * lfoS * t);
     const ratioWithLFO = ratio + lfo;
@@ -262,28 +276,53 @@ export function updateSimParamsBuffer() {
         400 // maxExpectedNeighbors
     ]);
     device.queue.writeBuffer(simParamsBuffer, 0, simParams);
+    paramsNeedUpdate = false;
 }
 
 export function createPipelines() {
     const particleColors = generateColors(numParticleTypes);
 
-    simModule = device.createShaderModule({ code: simShader });
+    // Only recreate sim shader module if it doesn't exist
+    if (!simModule || simShader !== cachedSimShaderCode) {
+        simModule = device.createShaderModule({ code: simShader });
+        cachedSimShaderCode = simShader;
+    }
+    
     simPipeline = device.createComputePipeline({
         layout: 'auto',
         compute: { module: simModule, entryPoint: 'main' },
     });
-    simBindGroup = device.createBindGroup({
+    
+    // Create both bind groups upfront to avoid recreation every frame
+    simBindGroupA = device.createBindGroup({
         layout: simPipeline.getBindGroupLayout(0),
         entries: [
             { binding: 0, resource: { buffer: particleBuffer } },
             { binding: 1, resource: { buffer: forceTableBuffer } },
             { binding: 2, resource: { buffer: simParamsBuffer } },
             { binding: 3, resource: { buffer: radioByTypeBuffer } },
-            { binding: 4, resource: { buffer: useBufferAasInput ? previousNeighborCountsBufferA : previousNeighborCountsBufferB } },
+            { binding: 4, resource: { buffer: previousNeighborCountsBufferA } },
+        ],
+    });
+    
+    simBindGroupB = device.createBindGroup({
+        layout: simPipeline.getBindGroupLayout(0),
+        entries: [
+            { binding: 0, resource: { buffer: particleBuffer } },
+            { binding: 1, resource: { buffer: forceTableBuffer } },
+            { binding: 2, resource: { buffer: simParamsBuffer } },
+            { binding: 3, resource: { buffer: radioByTypeBuffer } },
+            { binding: 4, resource: { buffer: previousNeighborCountsBufferB } },
         ],
     });
 
-    const renderModule = device.createShaderModule({ code: getRenderShaderCode(numParticleTypes, canvasWidth, canvasHeight, particleColors) });
+    // Only recreate render shader module if parameters changed
+    const newRenderShaderCode = getRenderShaderCode(numParticleTypes, canvasWidth, canvasHeight, particleColors);
+    if (!renderModule || newRenderShaderCode !== cachedRenderShaderCode) {
+        renderModule = device.createShaderModule({ code: newRenderShaderCode });
+        cachedRenderShaderCode = newRenderShaderCode;
+    }
+    
     renderPipeline = device.createRenderPipeline({
         layout: 'auto',
         vertex: { module: renderModule, entryPoint: 'vs_main' },
@@ -313,23 +352,13 @@ export function renderSimulationFrame() {
     const encoder = device.createCommandEncoder();
     const computePass = encoder.beginComputePass();
     computePass.setPipeline(simPipeline);
-    computePass.setBindGroup(0, simBindGroup);
+    // Use pre-created bind groups instead of recreating
+    computePass.setBindGroup(0, useBufferAasInput ? simBindGroupA : simBindGroupB);
     computePass.dispatchWorkgroups(Math.ceil(PARTICLE_COUNT / 64));
     computePass.end();
 
     // Swap the neighbor count buffers for next frame
     useBufferAasInput = !useBufferAasInput;
-    // Re-create the bind group with the swapped buffer
-    simBindGroup = device.createBindGroup({
-        layout: simPipeline.getBindGroupLayout(0),
-        entries: [
-            { binding: 0, resource: { buffer: particleBuffer } },
-            { binding: 1, resource: { buffer: forceTableBuffer } },
-            { binding: 2, resource: { buffer: simParamsBuffer } },
-            { binding: 3, resource: { buffer: radioByTypeBuffer } },
-            { binding: 4, resource: { buffer: useBufferAasInput ? previousNeighborCountsBufferA : previousNeighborCountsBufferB } },
-        ],
-    });
 
     const renderPass = encoder.beginRenderPass({
         colorAttachments: [
@@ -428,19 +457,19 @@ export function setNumParticleTypes(value) {
     });
 }
 
-export function setRadius(value) { radius = value; }
-export function setDeltaT(value) { delta_t = value; }
-export function setFriction(value) { friction = value; }
-export function setRepulsion(value) { repulsion = value; }
-export function setAttraction(value) { attraction = value; }
-export function setK(value) { k = value; }
-export function setForceRange(value) { forceRange = value; }
-export function setForceBias(value) { forceBias = value; }
-export function setRatio(value) { ratio = value; }
-export function setLfoA(value) { lfoA = value; }
-export function setLfoS(value) { lfoS = value; }
-export function setForceMultiplier(value) { forceMultiplier = value; }
-export function setBalance(value) { balance = value; }
+export function setRadius(value) { radius = value; paramsNeedUpdate = true; }
+export function setDeltaT(value) { delta_t = value; paramsNeedUpdate = true; }
+export function setFriction(value) { friction = value; paramsNeedUpdate = true; }
+export function setRepulsion(value) { repulsion = value; paramsNeedUpdate = true; }
+export function setAttraction(value) { attraction = value; paramsNeedUpdate = true; }
+export function setK(value) { k = value; paramsNeedUpdate = true; }
+export function setForceRange(value) { forceRange = value; paramsNeedUpdate = true; }
+export function setForceBias(value) { forceBias = value; paramsNeedUpdate = true; }
+export function setRatio(value) { ratio = value; paramsNeedUpdate = true; }
+export function setLfoA(value) { lfoA = value; paramsNeedUpdate = true; }
+export function setLfoS(value) { lfoS = value; paramsNeedUpdate = true; }
+export function setForceMultiplier(value) { forceMultiplier = value; paramsNeedUpdate = true; }
+export function setBalance(value) { balance = value; paramsNeedUpdate = true; }
 
 export function setForceOffset(value) { 
     forceOffset = value; 
@@ -450,6 +479,7 @@ export function setForceOffset(value) {
 export function setCanvasDimensions(width, height) {
     canvasWidth = width;
     canvasHeight = height;
+    paramsNeedUpdate = true;
 }
 
 export function getCurrentParams() {
