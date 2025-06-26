@@ -34,6 +34,7 @@
 <div x-show="open" x-transition>
       <div class="control-group">
         <label for="num-particles-slider">Particles</label>
+        <button class="precision-btn down" data-slider="num-particles-slider">◄</button>
         <input
           type="range"
           id="num-particles-slider"
@@ -42,10 +43,12 @@
           value="4000"
           step="1"
         />
+        <button class="precision-btn up" data-slider="num-particles-slider">►</button>
         <span id="num-particles-value" style="display:inline;">4000</span>
       </div>
       <div class="control-group">
         <label for="num-types-slider">Types</label>
+        <button class="precision-btn down" data-slider="num-types-slider">◄</button>
         <input
           type="range"
           id="num-types-slider"
@@ -54,10 +57,12 @@
           value="6"
           step="1"
         />
+        <button class="precision-btn up" data-slider="num-types-slider">►</button>
         <span id="num-types-value" style="display:inline;">6</span>
       </div>
       <div class="control-group">
         <label for="radius-slider">Radius</label>
+        <button class="precision-btn down" data-slider="radius-slider">◄</button>
         <input
           type="range"
           id="radius-slider"
@@ -66,10 +71,12 @@
           value="50.0"
           step="0.1"
         />
+        <button class="precision-btn up" data-slider="radius-slider">►</button>
         <span id="radius-value" style="display:inline;">50.0</span>
       </div>
       <div class="control-group">
         <label for="delta_t-slider">Time</label>
+        <button class="precision-btn down" data-slider="delta_t-slider">◄</button>
         <input
           type="range"
           id="delta_t-slider"
@@ -78,10 +85,12 @@
           value="0.22"
           step="0.01"
         />
+        <button class="precision-btn up" data-slider="delta_t-slider">►</button>
         <span id="delta_t-value" style="display:inline;">0.22</span>
       </div>
       <div class="control-group">
         <label for="friction-slider">Friction</label>
+        <button class="precision-btn down" data-slider="friction-slider">◄</button>
         <input
           type="range"
           id="friction-slider"
@@ -90,10 +99,12 @@
           value="0.71"
           step="0.01"
         />
+        <button class="precision-btn up" data-slider="friction-slider">►</button>
         <span id="friction-value" style="display:inline;">0.71</span>
       </div>
       <div class="control-group">
         <label for="repulsion-slider">Repulsion</label>
+        <button class="precision-btn down" data-slider="repulsion-slider">◄</button>
         <input
            type="range"
            id="repulsion-slider"
@@ -102,10 +113,12 @@
            value="100.0"
            step="0.1"
          />
+         <button class="precision-btn up" data-slider="repulsion-slider">►</button>
          <span id="repulsion-value" style="display:inline;">50.0</span>
       </div>
       <div class="control-group">
         <label for="attraction-slider">Attraction</label>
+        <button class="precision-btn down" data-slider="attraction-slider">◄</button>
         <input
            type="range"
            id="attraction-slider"
@@ -114,10 +127,12 @@
            value="0.62"
            step="0.01"
          />
+         <button class="precision-btn up" data-slider="attraction-slider">►</button>
          <span id="attraction-value" style="display:inline;">0.62</span>
       </div>
       <div class="control-group">
         <label for="k-slider">K</label>
+        <button class="precision-btn down" data-slider="k-slider">◄</button>
         <input
            type="range"
            id="k-slider"
@@ -127,10 +142,12 @@
            value="16.57"
            step="0.01"
          />
+         <button class="precision-btn up" data-slider="k-slider">►</button>
          <span id="k-value" style="display:inline;">16.57</span>
       </div>
       <div class="control-group">
         <label for="force-range-slider">F_Range</label>
+        <button class="precision-btn down" data-slider="force-range-slider">◄</button>
         <input
            type="range"
            id="force-range-slider"
@@ -139,10 +156,12 @@
            value="0.28"
            step="0.01"
          />
+         <button class="precision-btn up" data-slider="force-range-slider">►</button>
          <span id="force-range-value" style="display:inline;">0.28</span>
       </div>
       <div class="control-group">
         <label for="force-bias-slider">F_Bias</label>
+        <button class="precision-btn down" data-slider="force-bias-slider">◄</button>
         <input
            type="range"
            id="force-bias-slider"
@@ -151,10 +170,12 @@
            value="-0.20"
            step="0.005"
          />
+         <button class="precision-btn up" data-slider="force-bias-slider">►</button>
          <span id="force-bias-value" style="display:inline;">-0.20</span>
       </div>
       <div class="control-group">
         <label for="ratio-slider">Ratio</label>
+        <button class="precision-btn down" data-slider="ratio-slider">◄</button>
         <input
            type="range"
            id="ratio-slider"
@@ -163,10 +184,12 @@
            value="0.0"
            step="0.01"
          />
+         <button class="precision-btn up" data-slider="ratio-slider">►</button>
          <span id="ratio-value" style="display:inline;">0.0</span>
       </div>
       <div class="control-group">
         <label for="lfoa-slider">LFOA</label>
+        <button class="precision-btn down" data-slider="lfoa-slider">◄</button>
         <input
            type="range"
            id="lfoa-slider"
@@ -175,10 +198,12 @@
            value="0.00"
            step="0.01"
          />
+         <button class="precision-btn up" data-slider="lfoa-slider">►</button>
          <span id="lfoa-value" style="display:inline;">0.00</span>
       </div>
       <div class="control-group">
         <label for="lfos-slider">LFOS</label>
+        <button class="precision-btn down" data-slider="lfos-slider">◄</button>
         <input
            type="range"
            id="lfos-slider"
@@ -187,10 +212,12 @@
            value="0.10"
            step="0.01"
          />
+         <button class="precision-btn up" data-slider="lfos-slider">►</button>
          <span id="lfos-value" style="display:inline;">0.10</span>
       </div>
       <div class="control-group">
         <label for="force-multiplier-slider">F_Mult</label>
+        <button class="precision-btn down" data-slider="force-multiplier-slider">◄</button>
         <input
            type="range"
            id="force-multiplier-slider"
@@ -199,10 +226,12 @@
            value="2.33"
            step="0.01"
          />
+         <button class="precision-btn up" data-slider="force-multiplier-slider">►</button>
          <span id="force-multiplier-value" style="display:inline;">2.33</span>
       </div>
       <div class="control-group">
         <label for="balance-slider">Balance</label>
+        <button class="precision-btn down" data-slider="balance-slider">◄</button>
         <input
            type="range"
            id="balance-slider"
@@ -211,10 +240,12 @@
            value="0.79"
            step="0.01"
          />
+         <button class="precision-btn up" data-slider="balance-slider">►</button>
          <span id="balance-value" style="display:inline;">0.79</span>
       </div>
       <div class="control-group">
         <label for="force-offset-slider">F_Offset</label>
+        <button class="precision-btn down" data-slider="force-offset-slider">◄</button>
         <input
            type="range"
            id="force-offset-slider"
@@ -223,12 +254,18 @@
            value="0"
            step="0.01"
          />
+         <button class="precision-btn up" data-slider="force-offset-slider">►</button>
          <span id="force-offset-value" style="display:inline;">0.00</span>
       </div>
       <div style="display: flex; gap: 8px;">
         <button id="regen-button" style="flex: 1;">REGEN</button>
         <button id="reset-button" style="flex: 1;">RESET</button>
         <button id="rex-button" style="flex: 1;">reX</button>
+        <div class="increment-control" style="display: flex; align-items: center; gap: 4px; margin-left: 8px;">
+          <button id="increment-down" class="increment-btn">▼</button>
+          <span id="increment-value" class="increment-display">0.01</span>
+          <button id="increment-up" class="increment-btn">▲</button>
+        </div>
       </div>
       <div style="display: flex; gap: 8px; margin-top: 8px;">
         <button id="save-params-button" style="flex: 1;">Save</button>

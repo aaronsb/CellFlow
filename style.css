@@ -133,3 +133,62 @@ button {
 button:hover {
   background-color: #0056b3;
 }
+
+.precision-btn {
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  background-color: #35393e;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+  margin: 0 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.precision-btn:hover {
+  background-color: #0056b3;
+}
+
+.increment-control {
+  background-color: rgba(0, 0, 0, 0.5);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.increment-btn {
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  background-color: #35393e;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.increment-btn:hover {
+  background-color: #0056b3;
+}
+
+.increment-display {
+  min-width: 60px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: bold;
+  color: #fff;
+  background-color: #222;
+  padding: 2px 8px;
+  border-radius: 3px;
+  margin: 0 4px;
+}

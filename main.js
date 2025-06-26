@@ -429,6 +429,76 @@ function addEventListeners() {
         };
         reader.readAsText(file);
     });
+
+    // Precision control system
+    let globalIncrement = 0.01;
+    const incrementDisplay = document.getElementById('increment-value');
+    const incrementUpBtn = document.getElementById('increment-up');
+    const incrementDownBtn = document.getElementById('increment-down');
+    
+    // Power increments for the global increment control
+    const incrementSteps = [0.001, 0.01, 0.1, 1.0, 10.0, 100.0];
+    
+    function updateIncrementDisplay() {
+        incrementDisplay.textContent = globalIncrement.toFixed(3);
+    }
+    
+    incrementUpBtn.addEventListener('click', () => {
+        const currentIndex = incrementSteps.findIndex(val => Math.abs(val - globalIncrement) < 0.0001);
+        if (currentIndex < incrementSteps.length - 1) {
+            globalIncrement = incrementSteps[currentIndex + 1];
+            updateIncrementDisplay();
+        }
+    });
+    
+    incrementDownBtn.addEventListener('click', () => {
+        const currentIndex = incrementSteps.findIndex(val => Math.abs(val - globalIncrement) < 0.0001);
+        if (currentIndex > 0) {
+            globalIncrement = incrementSteps[currentIndex - 1];
+            updateIncrementDisplay();
+        }
+    });
+    
+    // Add precision button handlers for all sliders
+    document.querySelectorAll('.precision-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const sliderId = btn.getAttribute('data-slider');
+            const slider = document.getElementById(sliderId);
+            const isUp = btn.classList.contains('up');
+            
+            if (!slider) return;
+            
+            let currentValue = parseFloat(slider.value);
+            let min = parseFloat(slider.min);
+            let max = parseFloat(slider.max);
+            let step = parseFloat(slider.step);
+            
+            // Use global increment or slider step, whichever is larger
+            let increment = Math.max(globalIncrement, step);
+            
+            // Special handling for integer-only sliders
+            if (sliderId === 'num-particles-slider' || sliderId === 'num-types-slider') {
+                increment = Math.max(1, Math.round(globalIncrement));
+            }
+            
+            let newValue;
+            if (isUp) {
+                newValue = Math.min(currentValue + increment, max);
+            } else {
+                newValue = Math.max(currentValue - increment, min);
+            }
+            
+            // Round to avoid floating point precision issues
+            let decimals = increment < 1 ? Math.ceil(-Math.log10(increment)) : 2;
+            newValue = parseFloat(newValue.toFixed(decimals));
+            
+            slider.value = newValue;
+            
+            // Trigger the slider's input event to update the simulation
+            const event = new Event('input', { bubbles: true });
+            slider.dispatchEvent(event);
+        });
+    });
 }
 
 function frame(currentTime) {
