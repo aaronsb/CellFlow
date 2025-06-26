@@ -1,6 +1,6 @@
 // gpuSetup.js
-import { simShader } from './simShader.js';
-import { getRenderShaderCode } from './renderShader.js';
+import { simShader } from '../shaders/simShader.js';
+import { getRenderShaderCode } from '../shaders/renderShader.js';
 
 // --- Variables globales de WebGPU y simulación ---
 export let PARTICLE_COUNT = 4000;

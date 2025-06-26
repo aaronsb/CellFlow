@@ -27,20 +27,27 @@ npm start
 
 ### Core Components
 
-1. **WebGPU Pipeline** (`gpuSetup.js`)
+1. **WebGPU Pipeline** (`src/js/gpuSetup.js`)
    - Manages WebGPU device, buffers, and pipeline creation
    - Implements double-buffering for neighbor count tracking
    - Handles buffer lifecycle (creation/destruction on parameter changes)
 
-2. **Shaders** (WGSL)
+2. **Shaders** (WGSL in `src/shaders/`)
    - `simShader.js`: Compute shader for particle physics simulation
    - `renderShader.js`: Vertex/fragment shaders for particle rendering  
    - `glowShader.js`: Post-processing glow effect
 
-3. **Main Application** (`main.js`)
+3. **Main Application** (`src/js/main.js`)
    - UI event handling and parameter management
    - Orchestrates simulation loop
    - Handles recording functionality
+
+4. **File Structure**
+   - `src/js/`: JavaScript modules
+   - `src/shaders/`: WGSL shader files
+   - `src/css/`: Stylesheets
+   - `presets/`: Preset configurations (JSON)
+   - `docs/`: Documentation
 
 ### Key Patterns
 
