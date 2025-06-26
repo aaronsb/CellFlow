@@ -34,6 +34,14 @@ For detailed algorithm explanations and implementation details, see: https://www
 
 CellFlow is released as open source to encourage learning, experimentation, and community contributions. The codebase includes implementations in multiple languages and comprehensive parameter controls for exploring emergent behaviors.
 
+## Screenshots
+
+### WebGPU Version
+![CellFlow WebGPU](docs/media/Screenshot_20250626_121558.png)
+
+### CUDA Native Version
+![CellFlow CUDA](docs/media/Screenshot_20250626_121802.png)
+
 ## CUDA Native Implementation
 
 A high-performance CUDA implementation is available in the `cuda-native/` directory, offering:
