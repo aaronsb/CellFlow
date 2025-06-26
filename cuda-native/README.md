@@ -41,10 +41,20 @@ make -j$(nproc)
 
 ## Performance
 
-Expected particle counts:
-- GTX 1080: ~80,000 particles @ 60 FPS
-- RTX 3080: ~150,000 particles @ 60 FPS
-- RTX 4090: ~250,000 particles @ 60 FPS
+### Measured Performance (RTX 4060 Ti)
+
+![Performance comparison](docs/performance-screenshots.md)
+
+- **100,000 particles**: 13.8 FPS
+- **69,500 particles**: 28.4 FPS (optimal for smooth interaction)
+- **Performance gain**: 12-17x over WebGPU version
+
+The WebGPU version achieves similar frame rates with only ~8,000 particles.
+
+### Expected Performance (Other GPUs)
+- GTX 1080: ~50,000 particles @ 30 FPS
+- RTX 3080: ~120,000 particles @ 30 FPS
+- RTX 4090: ~200,000 particles @ 30 FPS
 
 ## Controls
 
