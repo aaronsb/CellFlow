@@ -8,6 +8,7 @@
 #include <QOpenGLVertexArrayObject>
 #include <QTimer>
 #include <QElapsedTimer>
+#include <QColor>
 #include <memory>
 #include <vector>
 
@@ -48,6 +49,10 @@ public:
     // Get current parameters
     const SimulationParams& getParams() const { return params; }
     int getParticleCount() const;
+    std::vector<QColor> getParticleColors() const;
+    std::vector<int> getParticleTypeCounts() const;
+    std::vector<float> getRadioByType() const;
+    void setRadioByTypeValue(int index, float value);
     
     // Load/Save presets
     bool loadPreset(const QString& filename);

@@ -47,6 +47,10 @@ public:
     // Rotate radius modifiers
     void rotateRadioByType();
     
+    // Get/Set radioByType values
+    std::vector<float> getRadioByType() const;
+    void setRadioByTypeValue(int index, float value);
+    
 private:
     int particleCount;
     int numParticleTypes;

@@ -308,3 +308,20 @@ void ParticleSimulation::rotateRadioByType() {
     CUDA_CHECK(cudaMemcpy(d_radioByType, h_radioByType.get(), 
         numParticleTypes * sizeof(float), cudaMemcpyHostToDevice));
 }
+
+std::vector<float> ParticleSimulation::getRadioByType() const {
+    std::vector<float> result(numParticleTypes);
+    for (int i = 0; i < numParticleTypes; i++) {
+        result[i] = h_radioByType[i];
+    }
+    return result;
+}
+
+void ParticleSimulation::setRadioByTypeValue(int index, float value) {
+    if (index >= 0 && index < numParticleTypes) {
+        h_radioByType[index] = value;
+        // Upload to device
+        CUDA_CHECK(cudaMemcpy(d_radioByType, h_radioByType.get(), 
+            numParticleTypes * sizeof(float), cudaMemcpyHostToDevice));
+    }
+}

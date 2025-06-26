@@ -5,10 +5,12 @@
 #include <QSlider>
 #include <QLabel>
 #include <QLineEdit>
+#include <QSpinBox>
 #include <QDoubleValidator>
 #include <QIntValidator>
 #include <QPushButton>
 #include <QGroupBox>
+#include <QTableWidget>
 #include <memory>
 
 class CellFlowWidget;
@@ -21,7 +23,7 @@ public:
 
 private slots:
     void onParticleCountConfirmed();
-    void onParticleTypesConfirmed();
+    void onParticleTypesChanged(int value);
     void onRadiusChanged(int value);
     void onDeltaTChanged(int value);
     void onFrictionChanged(int value);
@@ -46,6 +48,8 @@ private slots:
     void onLoadClicked();
     
     void updateFPS(double fps);
+    void updateParticleTypeTable();
+    void onRadiusModCellChanged(int row, int column);
     
 private:
     void setupUI();
@@ -58,7 +62,7 @@ private:
     
     // Control widgets
     QLineEdit* particleCountEdit;
-    QLineEdit* particleTypesEdit;
+    QSpinBox* particleTypesSpinBox;
     
     QSlider* radiusSlider;
     QSlider* deltaTSlider;
@@ -94,6 +98,7 @@ private:
     QLineEdit* pointSizeEdit;
     
     QLabel* fpsLabel;
+    QTableWidget* particleTypeTable;
 };
 
 #endif // MAINWINDOW_H

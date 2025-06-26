@@ -8,12 +8,18 @@
 #include <QMessageBox>
 #include <QKeyEvent>
 #include <QStatusBar>
+#include <QTableWidgetItem>
+#include <QHeaderView>
+#include <QTimer>
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setupUI();
     
     // Load preset 1 by default
     cellFlowWidget->loadPreset("presets/1.json");
+    
+    // Initial update of particle type table
+    updateParticleTypeTable();
 }
 
 void MainWindow::setupUI() {
@@ -27,6 +33,11 @@ void MainWindow::setupUI() {
     cellFlowWidget = new CellFlowWidget(this);
     cellFlowWidget->setMinimumSize(800, 600);
     connect(cellFlowWidget, &CellFlowWidget::fpsChanged, this, &MainWindow::updateFPS);
+    
+    // Create timer to update particle counts periodically
+    QTimer* updateTimer = new QTimer(this);
+    connect(updateTimer, &QTimer::timeout, this, &MainWindow::updateParticleTypeTable);
+    updateTimer->start(5000); // Update every 5 seconds
     
     // Create control panel
     QScrollArea* scrollArea = new QScrollArea(this);
@@ -55,13 +66,13 @@ void MainWindow::setupUI() {
     particleLayout->addWidget(particleCountEdit, 0, 1);
     
     particleLayout->addWidget(new QLabel("Types:"), 1, 0);
-    particleTypesEdit = new QLineEdit(this);
-    particleTypesEdit->setText("6");
-    particleTypesEdit->setValidator(new QIntValidator(2, 10, this));
-    particleTypesEdit->setMaximumWidth(100);
-    connect(particleTypesEdit, &QLineEdit::returnPressed,
-            this, &MainWindow::onParticleTypesConfirmed);
-    particleLayout->addWidget(particleTypesEdit, 1, 1);
+    particleTypesSpinBox = new QSpinBox(this);
+    particleTypesSpinBox->setRange(2, 10);
+    particleTypesSpinBox->setValue(6);
+    particleTypesSpinBox->setMaximumWidth(100);
+    connect(particleTypesSpinBox, QOverload<int>::of(&QSpinBox::valueChanged),
+            this, &MainWindow::onParticleTypesChanged);
+    particleLayout->addWidget(particleTypesSpinBox, 1, 1);
     
     controlLayout->addWidget(particleGroup);
     
@@ -136,6 +147,27 @@ void MainWindow::setupUI() {
     
     controlLayout->addWidget(buttonsGroup);
     
+    // Particle Type Status
+    QGroupBox* statusGroup = new QGroupBox("Particle Type Status", this);
+    QVBoxLayout* statusLayout = new QVBoxLayout(statusGroup);
+    
+    particleTypeTable = new QTableWidget(this);
+    particleTypeTable->setColumnCount(3);
+    particleTypeTable->setHorizontalHeaderLabels(QStringList() << "Type" << "Count" << "Radius Mod");
+    particleTypeTable->horizontalHeader()->setStretchLastSection(true);
+    // Table will resize dynamically based on content
+    particleTypeTable->setAlternatingRowColors(true);
+    particleTypeTable->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
+    particleTypeTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    particleTypeTable->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    
+    // Connect cell changed signal to update radius modifiers
+    connect(particleTypeTable, &QTableWidget::cellChanged, 
+            this, &MainWindow::onRadiusModCellChanged);
+    
+    statusLayout->addWidget(particleTypeTable);
+    controlLayout->addWidget(statusGroup);
+    
     // Add stretch at the bottom
     controlLayout->addStretch();
     
@@ -148,7 +180,8 @@ void MainWindow::setupUI() {
     
     // Set window properties
     setWindowTitle("CellFlow CUDA");
-    resize(1400, 900);
+    // Set 4:3 ratio window size large enough for all controls
+    resize(1600, 1200);
 }
 
 QWidget* MainWindow::createControlGroup(const QString& label, QSlider*& slider, 
@@ -228,16 +261,14 @@ void MainWindow::onParticleCountConfirmed() {
     if (ok) {
         cellFlowWidget->setParticleCount(value);
         cellFlowWidget->regenerateForces();  // Regenerate after confirming count
+        updateParticleTypeTable();
     }
 }
 
-void MainWindow::onParticleTypesConfirmed() {
-    bool ok;
-    int value = particleTypesEdit->text().toInt(&ok);
-    if (ok) {
-        cellFlowWidget->setNumParticleTypes(value);
-        cellFlowWidget->regenerateForces();  // Regenerate after confirming types
-    }
+void MainWindow::onParticleTypesChanged(int value) {
+    cellFlowWidget->setNumParticleTypes(value);
+    cellFlowWidget->regenerateForces();  // Regenerate after changing types
+    updateParticleTypeTable();
 }
 
 void MainWindow::onRadiusChanged(int value) {
@@ -317,16 +348,19 @@ void MainWindow::onPointSizeChanged(int value) {
 
 void MainWindow::onRegenerateClicked() {
     cellFlowWidget->regenerateForces();
+    updateParticleTypeTable();
 }
 
 void MainWindow::onResetClicked() {
     cellFlowWidget->resetSimulation();
+    updateParticleTypeTable();
 }
 
 void MainWindow::onReXClicked() {
     cellFlowWidget->rotateRadioByType();
+    updateParticleTypeTable();
     // Show brief status message
-    statusBar()->showMessage("Rotated particle radius modifiers", 2000);
+    statusBar()->showMessage("Shifted interaction distances between particle types", 2000);
 }
 
 void MainWindow::onSaveClicked() {
@@ -347,7 +381,7 @@ void MainWindow::onLoadClicked() {
             // Update UI controls to match loaded values
             const SimulationParams& params = cellFlowWidget->getParams();
             particleCountEdit->setText(QString::number(cellFlowWidget->getParticleCount()));
-            particleTypesEdit->setText(QString::number(params.numParticleTypes));
+            particleTypesSpinBox->setValue(params.numParticleTypes);
             
             // Update sliders - they will automatically update the edit boxes
             radiusSlider->setValue(static_cast<int>((params.radius - 10.0) / 0.1));
@@ -359,6 +393,7 @@ void MainWindow::onLoadClicked() {
             balanceSlider->setValue(static_cast<int>((params.balance - 0.01) / 0.01));
             forceMultiplierSlider->setValue(static_cast<int>(params.forceMultiplier / 0.01));
             // Add other sliders as needed
+            updateParticleTypeTable();
         } else {
             QMessageBox::warning(this, "Error", "Failed to load preset!");
         }
@@ -367,4 +402,75 @@ void MainWindow::onLoadClicked() {
 
 void MainWindow::updateFPS(double fps) {
     fpsLabel->setText(QString("FPS: %1").arg(fps, 0, 'f', 1));
+}
+
+void MainWindow::updateParticleTypeTable() {
+    // Get particle data from simulation
+    const SimulationParams& params = cellFlowWidget->getParams();
+    int numTypes = params.numParticleTypes;
+    
+    // Update table rows
+    particleTypeTable->setRowCount(numTypes);
+    
+    // Get particle colors and counts
+    std::vector<QColor> colors = cellFlowWidget->getParticleColors();
+    std::vector<int> typeCounts = cellFlowWidget->getParticleTypeCounts();
+    std::vector<float> radioByType = cellFlowWidget->getRadioByType();
+    
+    for (int i = 0; i < numTypes; i++) {
+        // Type column with color (not editable)
+        QTableWidgetItem* typeItem = new QTableWidgetItem(QString("Type %1").arg(i + 1));
+        if (i < colors.size()) {
+            typeItem->setForeground(QBrush(colors[i]));
+            typeItem->setFont(QFont("", -1, QFont::Bold));
+        }
+        typeItem->setFlags(typeItem->flags() & ~Qt::ItemIsEditable);
+        particleTypeTable->setItem(i, 0, typeItem);
+        
+        // Count column (not editable)
+        int count = (i < typeCounts.size()) ? typeCounts[i] : 0;
+        QTableWidgetItem* countItem = new QTableWidgetItem(QString::number(count));
+        countItem->setTextAlignment(Qt::AlignCenter);
+        countItem->setFlags(countItem->flags() & ~Qt::ItemIsEditable);
+        particleTypeTable->setItem(i, 1, countItem);
+        
+        // Radius modifier column (editable)
+        float radiusMod = (i < radioByType.size()) ? radioByType[i] : 0.0f;
+        QTableWidgetItem* radiusItem = new QTableWidgetItem(QString("%1").arg(radiusMod, 0, 'f', 2));
+        radiusItem->setTextAlignment(Qt::AlignCenter);
+        radiusItem->setToolTip("Double-click to edit (-1.0 to 1.0)");
+        particleTypeTable->setItem(i, 2, radiusItem);
+    }
+    
+    particleTypeTable->resizeColumnsToContents();
+    
+    // Resize table height to fit content
+    int rowHeight = particleTypeTable->rowHeight(0);
+    int headerHeight = particleTypeTable->horizontalHeader()->height();
+    int frameWidth = particleTypeTable->frameWidth() * 2;
+    int totalHeight = headerHeight + (rowHeight * numTypes) + frameWidth + 2;
+    
+    particleTypeTable->setFixedHeight(totalHeight);
+}
+
+void MainWindow::onRadiusModCellChanged(int row, int column) {
+    // Only handle changes to the Radius Mod column (column 2)
+    if (column != 2) return;
+    
+    QTableWidgetItem* item = particleTypeTable->item(row, column);
+    if (!item) return;
+    
+    bool ok;
+    float newValue = item->text().toFloat(&ok);
+    
+    if (ok && newValue >= -1.0f && newValue <= 1.0f) {
+        // Update the radius modifier for this particle type
+        cellFlowWidget->setRadioByTypeValue(row, newValue);
+    } else {
+        // Invalid value, restore the original
+        std::vector<float> radioByType = cellFlowWidget->getRadioByType();
+        if (row < radioByType.size()) {
+            item->setText(QString("%1").arg(radioByType[row], 0, 'f', 2));
+        }
+    }
 }
