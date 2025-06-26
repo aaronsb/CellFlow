@@ -42,6 +42,7 @@ public:
     void setLfoA(float value);
     void setLfoS(float value);
     void setForceOffset(float value);
+    void setPointSize(float value);
     
     // Get current parameters
     const SimulationParams& getParams() const { return params; }

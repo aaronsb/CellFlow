@@ -33,6 +33,9 @@ struct SimulationParams {
     float lfoA = 0.0f;
     float lfoS = 0.1f;
     float forceOffset = 1.0f;
+    
+    // Rendering parameters
+    float pointSize = 4.0f;
 };
 
 // Color definitions (RGB values 0-1)

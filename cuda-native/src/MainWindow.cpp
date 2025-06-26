@@ -87,6 +87,14 @@ void MainWindow::setupUI() {
     
     controlLayout->addWidget(advancedGroup);
     
+    // Rendering parameters
+    QGroupBox* renderGroup = new QGroupBox("Rendering", this);
+    QVBoxLayout* renderLayout = new QVBoxLayout(renderGroup);
+    
+    renderLayout->addWidget(createControlGroup("Point Size", pointSizeSlider, pointSizeLabel, 1.0, 10.0, 4.0, 0.5));
+    
+    controlLayout->addWidget(renderGroup);
+    
     // Adaptive parameters
     QGroupBox* adaptiveGroup = new QGroupBox("Adaptive Parameters", this);
     QVBoxLayout* adaptiveLayout = new QVBoxLayout(adaptiveGroup);
@@ -190,6 +198,7 @@ QWidget* MainWindow::createControlGroup(const QString& label, QSlider*& slider,
     else if (label == "LFOA") connect(slider, &QSlider::valueChanged, this, &MainWindow::onLfoAChanged);
     else if (label == "LFOS") connect(slider, &QSlider::valueChanged, this, &MainWindow::onLfoSChanged);
     else if (label == "F_Offset") connect(slider, &QSlider::valueChanged, this, &MainWindow::onForceOffsetChanged);
+    else if (label == "Point Size") connect(slider, &QSlider::valueChanged, this, &MainWindow::onPointSizeChanged);
     
     return widget;
 }
@@ -289,6 +298,12 @@ void MainWindow::onForceOffsetChanged(int value) {
     double v = -1.0 + value * 0.01;
     cellFlowWidget->setForceOffset(v);
     updateSliderValue(forceOffsetSlider, forceOffsetLabel, v);
+}
+
+void MainWindow::onPointSizeChanged(int value) {
+    double v = 1.0 + value * 0.5;
+    cellFlowWidget->setPointSize(v);
+    updateSliderValue(pointSizeSlider, pointSizeLabel, v, 1);
 }
 
 void MainWindow::onRegenerateClicked() {

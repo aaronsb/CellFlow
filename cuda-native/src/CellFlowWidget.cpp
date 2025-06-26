@@ -83,6 +83,7 @@ void CellFlowWidget::initializeShaders() {
         
         uniform vec2 canvasSize;
         uniform vec3 particleColors[10];
+        uniform float pointSize;
         
         out vec3 fragColor;
         
@@ -91,7 +92,7 @@ void CellFlowWidget::initializeShaders() {
             normalizedPos.y = -normalizedPos.y; // Flip Y coordinate
             
             gl_Position = vec4(normalizedPos, 0.0, 1.0);
-            gl_PointSize = 4.0;
+            gl_PointSize = pointSize;
             
             fragColor = particleColors[int(particleType)];
         }
@@ -162,6 +163,7 @@ void CellFlowWidget::paintGL() {
     
     // Set uniforms
     shaderProgram->setUniformValue("canvasSize", QVector2D(params.canvasWidth, params.canvasHeight));
+    shaderProgram->setUniformValue("pointSize", params.pointSize);
     
     // Set particle colors
     for (int i = 0; i < params.numParticleTypes; ++i) {
@@ -357,6 +359,10 @@ void CellFlowWidget::setLfoS(float value) { params.lfoS = value; }
 void CellFlowWidget::setForceOffset(float value) {
     params.forceOffset = value;
     simulation->updateForceTable(params.forceRange, params.forceBias, params.forceOffset);
+}
+
+void CellFlowWidget::setPointSize(float value) {
+    params.pointSize = value;
 }
 
 void CellFlowWidget::regenerateForces() {

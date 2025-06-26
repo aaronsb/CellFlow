@@ -35,6 +35,7 @@ private slots:
     void onLfoAChanged(int value);
     void onLfoSChanged(int value);
     void onForceOffsetChanged(int value);
+    void onPointSizeChanged(int value);
     
     void onRegenerateClicked();
     void onResetClicked();
@@ -75,6 +76,7 @@ private:
     QSlider* lfoASlider;
     QSlider* lfoSSlider;
     QSlider* forceOffsetSlider;
+    QSlider* pointSizeSlider;
     
     // Value labels
     QLabel* radiusLabel;
@@ -91,6 +93,7 @@ private:
     QLabel* lfoALabel;
     QLabel* lfoSLabel;
     QLabel* forceOffsetLabel;
+    QLabel* pointSizeLabel;
     
     QLabel* fpsLabel;
     QLabel* incrementLabel;
