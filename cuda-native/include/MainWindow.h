@@ -42,9 +42,6 @@ private slots:
     void onResetClicked();
     void onReXClicked();
     
-    void onIncrementUp();
-    void onIncrementDown();
-    
     void onSaveClicked();
     void onLoadClicked();
     
@@ -97,12 +94,6 @@ private:
     QLineEdit* pointSizeEdit;
     
     QLabel* fpsLabel;
-    QLabel* incrementLabel;
-    
-    // Increment control
-    double currentIncrement = 0.01;
-    const double incrementSteps[6] = {0.001, 0.01, 0.1, 1.0, 10.0, 100.0};
-    int currentIncrementIndex = 1;
 };
 
 #endif // MAINWINDOW_H

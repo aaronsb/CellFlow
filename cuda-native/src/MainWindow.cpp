@@ -123,19 +123,6 @@ void MainWindow::setupUI() {
     buttonsLayout->addWidget(resetButton, 0, 1);
     buttonsLayout->addWidget(rexButton, 0, 2);
     
-    // Increment controls
-    QPushButton* incrementDownBtn = new QPushButton("▼", this);
-    incrementLabel = new QLabel("0.010", this);
-    incrementLabel->setAlignment(Qt::AlignCenter);
-    QPushButton* incrementUpBtn = new QPushButton("▲", this);
-    
-    connect(incrementDownBtn, &QPushButton::clicked, this, &MainWindow::onIncrementDown);
-    connect(incrementUpBtn, &QPushButton::clicked, this, &MainWindow::onIncrementUp);
-    
-    buttonsLayout->addWidget(incrementDownBtn, 1, 0);
-    buttonsLayout->addWidget(incrementLabel, 1, 1);
-    buttonsLayout->addWidget(incrementUpBtn, 1, 2);
-    
     // Save/Load buttons
     QPushButton* saveButton = new QPushButton("Save", this);
     QPushButton* loadButton = new QPushButton("Load", this);
@@ -143,8 +130,8 @@ void MainWindow::setupUI() {
     connect(saveButton, &QPushButton::clicked, this, &MainWindow::onSaveClicked);
     connect(loadButton, &QPushButton::clicked, this, &MainWindow::onLoadClicked);
     
-    buttonsLayout->addWidget(saveButton, 2, 0, 1, 2);
-    buttonsLayout->addWidget(loadButton, 2, 2);
+    buttonsLayout->addWidget(saveButton, 1, 0, 1, 2);
+    buttonsLayout->addWidget(loadButton, 1, 2);
     
     controlLayout->addWidget(buttonsGroup);
     
@@ -337,22 +324,6 @@ void MainWindow::onResetClicked() {
 
 void MainWindow::onReXClicked() {
     // Cycle radius (implement if needed)
-}
-
-void MainWindow::onIncrementUp() {
-    if (currentIncrementIndex < 5) {
-        currentIncrementIndex++;
-        currentIncrement = incrementSteps[currentIncrementIndex];
-        incrementLabel->setText(QString::number(currentIncrement, 'f', 3));
-    }
-}
-
-void MainWindow::onIncrementDown() {
-    if (currentIncrementIndex > 0) {
-        currentIncrementIndex--;
-        currentIncrement = incrementSteps[currentIncrementIndex];
-        incrementLabel->setText(QString::number(currentIncrement, 'f', 3));
-    }
 }
 
 void MainWindow::onSaveClicked() {
