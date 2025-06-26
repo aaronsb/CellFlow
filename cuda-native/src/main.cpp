@@ -3,16 +3,21 @@
 #include "MainWindow.h"
 
 int main(int argc, char* argv[]) {
+    // Set environment for Wayland
+    qputenv("QT_QPA_PLATFORM", "wayland;xcb"); // Try Wayland first, fall back to X11
+    
     QApplication app(argc, argv);
     
-    // Set OpenGL format for Wayland compatibility
+    // Set OpenGL format for better compatibility
     QSurfaceFormat format;
-    format.setVersion(3, 3);
+    format.setVersion(3, 2); // Lower version for better compatibility
     format.setProfile(QSurfaceFormat::CoreProfile);
+    format.setRenderableType(QSurfaceFormat::OpenGL);
     format.setDepthBufferSize(24);
     format.setStencilBufferSize(8);
-    format.setSamples(4); // Enable multisampling
+    format.setSamples(0); // Disable multisampling initially
     format.setSwapInterval(1); // VSync
+    format.setOption(QSurfaceFormat::DebugContext, false);
     QSurfaceFormat::setDefaultFormat(format);
     
     // High DPI is enabled by default in Qt6

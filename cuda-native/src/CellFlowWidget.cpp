@@ -6,6 +6,7 @@
 #include <QFile>
 #include <iostream>
 #include <cmath>
+#include <GL/gl.h>
 
 CellFlowWidget::CellFlowWidget(QWidget* parent)
     : QOpenGLWidget(parent), 
@@ -24,8 +25,10 @@ CellFlowWidget::CellFlowWidget(QWidget* parent)
     
     // Set format for Wayland compatibility
     QSurfaceFormat format;
-    format.setVersion(3, 3);
+    format.setVersion(3, 2);
     format.setProfile(QSurfaceFormat::CoreProfile);
+    format.setRenderableType(QSurfaceFormat::OpenGL);
+    format.setSamples(0);
     format.setSwapInterval(1); // Enable VSync
     setFormat(format);
 }
@@ -41,9 +44,16 @@ CellFlowWidget::~CellFlowWidget() {
 void CellFlowWidget::initializeGL() {
     initializeOpenGLFunctions();
     
+    // Check OpenGL version
+    const char* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+    const char* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+    std::cout << "OpenGL Version: " << version << std::endl;
+    std::cout << "OpenGL Renderer: " << renderer << std::endl;
+    
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_PROGRAM_POINT_SIZE);
     
     initializeShaders();
     
@@ -52,7 +62,12 @@ void CellFlowWidget::initializeGL() {
     vao.bind();
     
     particleBuffer.create();
+    particleBuffer.bind();
     particleBuffer.setUsagePattern(QOpenGLBuffer::DynamicDraw);
+    
+    // Initial particle data fetch
+    simulation->getParticleData(particleData);
+    updateParticleBuffer();
     
     vao.release();
 }
@@ -62,9 +77,9 @@ void CellFlowWidget::initializeShaders() {
     
     // Vertex shader
     const char* vertexShaderSource = R"(
-        #version 330 core
-        layout(location = 0) in vec2 position;
-        layout(location = 1) in uint particleType;
+        #version 150 core
+        in vec2 position;
+        in float particleType;
         
         uniform vec2 canvasSize;
         uniform vec3 particleColors[10];
@@ -78,13 +93,13 @@ void CellFlowWidget::initializeShaders() {
             gl_Position = vec4(normalizedPos, 0.0, 1.0);
             gl_PointSize = 2.0;
             
-            fragColor = particleColors[particleType];
+            fragColor = particleColors[int(particleType)];
         }
     )";
     
     // Fragment shader
     const char* fragmentShaderSource = R"(
-        #version 330 core
+        #version 150 core
         in vec3 fragColor;
         out vec4 outColor;
         
@@ -101,9 +116,23 @@ void CellFlowWidget::initializeShaders() {
         }
     )";
     
-    shaderProgram->addShaderFromSourceCode(QOpenGLShader::Vertex, vertexShaderSource);
-    shaderProgram->addShaderFromSourceCode(QOpenGLShader::Fragment, fragmentShaderSource);
-    shaderProgram->link();
+    if (!shaderProgram->addShaderFromSourceCode(QOpenGLShader::Vertex, vertexShaderSource)) {
+        std::cerr << "Vertex shader compilation failed: " << shaderProgram->log().toStdString() << std::endl;
+    }
+    
+    if (!shaderProgram->addShaderFromSourceCode(QOpenGLShader::Fragment, fragmentShaderSource)) {
+        std::cerr << "Fragment shader compilation failed: " << shaderProgram->log().toStdString() << std::endl;
+    }
+    
+    if (!shaderProgram->link()) {
+        std::cerr << "Shader linking failed: " << shaderProgram->log().toStdString() << std::endl;
+    } else {
+        std::cout << "Shaders compiled and linked successfully!" << std::endl;
+    }
+    
+    // Bind attribute locations
+    shaderProgram->bindAttributeLocation("position", 0);
+    shaderProgram->bindAttributeLocation("particleType", 1);
 }
 
 void CellFlowWidget::resizeGL(int w, int h) {
@@ -118,7 +147,15 @@ void CellFlowWidget::resizeGL(int w, int h) {
 void CellFlowWidget::paintGL() {
     glClear(GL_COLOR_BUFFER_BIT);
     
-    if (!shaderProgram || particleData.empty()) return;
+    if (!shaderProgram) {
+        std::cout << "No shader program!" << std::endl;
+        return;
+    }
+    
+    if (particleData.empty()) {
+        std::cout << "No particle data!" << std::endl;
+        return;
+    }
     
     shaderProgram->bind();
     vao.bind();
@@ -136,8 +173,19 @@ void CellFlowWidget::paintGL() {
     // Update particle buffer
     updateParticleBuffer();
     
+    // Enable point rendering
+    glEnable(GL_PROGRAM_POINT_SIZE);
+    glPointSize(2.0f);
+    
     // Draw particles as points
-    glDrawArrays(GL_POINTS, 0, particleData.size());
+    int particleCount = particleData.size();
+    glDrawArrays(GL_POINTS, 0, particleCount);
+    
+    // Check for errors
+    GLenum err = glGetError();
+    if (err != GL_NO_ERROR) {
+        std::cout << "OpenGL error: " << err << std::endl;
+    }
     
     vao.release();
     shaderProgram->release();
@@ -154,6 +202,8 @@ void CellFlowWidget::paintGL() {
 }
 
 void CellFlowWidget::updateSimulation() {
+    static int frameCounter = 0;
+    
     // Update LFO if active
     if (params.lfoA != 0.0f) {
         float t = frameTimer.elapsed() / 1000.0f;
@@ -168,6 +218,13 @@ void CellFlowWidget::updateSimulation() {
     
     // Get updated particle data
     simulation->getParticleData(particleData);
+    
+    // Debug output every 60 frames
+    if (frameCounter++ % 60 == 0 && !particleData.empty()) {
+        std::cout << "Frame " << frameCounter << ": " << particleData.size() << " particles, "
+                  << "First particle at (" << particleData[0].pos.x << ", " << particleData[0].pos.y << ")" 
+                  << std::endl;
+    }
     
     update(); // Trigger repaint
 }
