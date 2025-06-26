@@ -114,12 +114,15 @@ void MainWindow::setupUI() {
     
     QPushButton* regenButton = new QPushButton("REGEN", this);
     QPushButton* resetButton = new QPushButton("RESET", this);
+    QPushButton* rexButton = new QPushButton("reX", this);
     
     connect(regenButton, &QPushButton::clicked, this, &MainWindow::onRegenerateClicked);
     connect(resetButton, &QPushButton::clicked, this, &MainWindow::onResetClicked);
+    connect(rexButton, &QPushButton::clicked, this, &MainWindow::onReXClicked);
     
     buttonsLayout->addWidget(regenButton, 0, 0);
     buttonsLayout->addWidget(resetButton, 0, 1);
+    buttonsLayout->addWidget(rexButton, 0, 2);
     
     // Save/Load buttons
     QPushButton* saveButton = new QPushButton("Save", this);
