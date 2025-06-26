@@ -41,3 +41,6 @@ A high-performance CUDA implementation is available in the `cuda-native/` direct
 - Support for **100,000+ particles** in real-time
 - Native Qt6 interface for Linux/Wayland
 - See [cuda-native/README.md](cuda-native/README.md) for details
+
+### Performance Demo
+[![CellFlow CUDA 100k Particles](https://img.youtube.com/vi/ZMKAkzZCcAk/maxresdefault.jpg)](https://youtu.be/ZMKAkzZCcAk)

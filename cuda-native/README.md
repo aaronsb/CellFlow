@@ -41,6 +41,12 @@ make -j$(nproc)
 
 ## Performance
 
+### Video Demonstration
+
+[![CellFlow CUDA Performance Demo](https://img.youtube.com/vi/ZMKAkzZCcAk/maxresdefault.jpg)](https://youtu.be/ZMKAkzZCcAk)
+
+*Click to watch the CUDA implementation in action with 100,000+ particles*
+
 ### Measured Performance (RTX 4060 Ti)
 
 ![Performance comparison](docs/performance-screenshots.md)
