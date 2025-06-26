@@ -6,6 +6,7 @@
 #include <QOpenGLShaderProgram>
 #include <QOpenGLBuffer>
 #include <QOpenGLVertexArrayObject>
+#include <QOpenGLFramebufferObject>
 #include <QTimer>
 #include <QElapsedTimer>
 #include <QColor>
@@ -50,6 +51,7 @@ public:
     void setLfoS(float value);
     void setForceOffset(float value);
     void setPointSize(float value);
+    void setMetaball(float value);
     
     // Get current parameters
     const SimulationParams& getParams() const { return params; }
@@ -78,16 +80,28 @@ private slots:
 
 private:
     void initializeShaders();
+    void initializeMetaballShaders();
+    void initializeQuadBuffer();
     void updateParticleBuffer();
     void generateParticleColors();
+    void renderMetaballs();
+    void cleanupMetaballResources();
     
     std::unique_ptr<ParticleSimulation> simulation;
     SimulationParams params;
     
     // OpenGL resources
     QOpenGLShaderProgram* shaderProgram;
+    QOpenGLShaderProgram* metaballAccumProgram;
+    QOpenGLShaderProgram* metaballCompositeProgram;
     QOpenGLBuffer particleBuffer;
     QOpenGLVertexArrayObject vao;
+    
+    // Metaball rendering resources
+    std::vector<QOpenGLFramebufferObject*> metaballFBOs; // One per particle type
+    QOpenGLVertexArrayObject quadVAO;
+    QOpenGLBuffer quadVBO;
+    GLuint particleTexture;
     
     // Particle data
     std::vector<Particle> particleData;

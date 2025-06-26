@@ -11,7 +11,9 @@
 CellFlowWidget::CellFlowWidget(QWidget* parent)
     : QOpenGLWidget(parent), 
       simulation(std::make_unique<ParticleSimulation>(4000)),
-      frameCount(0), currentFPS(0.0), lastFPSUpdate(0) {
+      frameCount(0), currentFPS(0.0), lastFPSUpdate(0),
+      shaderProgram(nullptr), metaballAccumProgram(nullptr), metaballCompositeProgram(nullptr),
+      particleTexture(0) {
     
     // Set up the timer for updates
     timer = new QTimer(this);
@@ -37,7 +39,15 @@ CellFlowWidget::~CellFlowWidget() {
     makeCurrent();
     particleBuffer.destroy();
     vao.destroy();
+    quadVBO.destroy();
+    quadVAO.destroy();
     delete shaderProgram;
+    delete metaballAccumProgram;
+    delete metaballCompositeProgram;
+    if (particleTexture != 0) {
+        glDeleteTextures(1, &particleTexture);
+    }
+    cleanupMetaballResources();
     doneCurrent();
 }
 
@@ -56,6 +66,8 @@ void CellFlowWidget::initializeGL() {
     glEnable(GL_PROGRAM_POINT_SIZE);
     
     initializeShaders();
+    initializeMetaballShaders();
+    initializeQuadBuffer();
     
     // Create VAO and VBO
     vao.create();
@@ -136,6 +148,189 @@ void CellFlowWidget::initializeShaders() {
     shaderProgram->bindAttributeLocation("particleType", 1);
 }
 
+void CellFlowWidget::initializeMetaballShaders() {
+    // Accumulation shader - renders particles as metaballs to texture per type
+    metaballAccumProgram = new QOpenGLShaderProgram(this);
+    
+    const char* accumVertexShader = R"(
+        #version 150 core
+        in vec2 position;
+        in vec2 texCoord;
+        
+        out vec2 fragTexCoord;
+        
+        void main() {
+            gl_Position = vec4(position, 0.0, 1.0);
+            fragTexCoord = texCoord;
+        }
+    )";
+    
+    const char* accumFragmentShader = R"(
+        #version 150 core
+        in vec2 fragTexCoord;
+        out vec4 outColor;
+        
+        uniform vec2 canvasSize;
+        uniform int particleCount;
+        uniform sampler2D particleTexture;
+        uniform int textureWidth;
+        
+        float ball(vec2 x, vec2 p, float falloff) {
+            float d = length(x - p);
+            return exp(-1.0 / falloff * d * d);
+        }
+        
+        void main() {
+            vec2 uv = (fragTexCoord * canvasSize - 0.5 * canvasSize) / canvasSize.y;
+            
+            // Accumulate metaball influence for types 0-3 in RGBA channels
+            vec4 typeDist = vec4(0.0);
+            
+            // Sample all particles from texture
+            for (int i = 0; i < particleCount; i++) {
+                // Calculate texture coordinate for this particle
+                int row = i / textureWidth;
+                int col = i % textureWidth;
+                vec2 texCoord = vec2(float(col) + 0.5, float(row) + 0.5) / vec2(textureWidth, textureWidth);
+                
+                // Sample particle data (position in RG, type in B)
+                vec3 particleData = texture(particleTexture, texCoord).rgb;
+                vec2 particlePos = particleData.xy;
+                int particleType = int(particleData.z * 255.0);
+                
+                // Accumulate influence for types 0-3 in respective channels
+                if (particleType >= 0 && particleType < 4) {
+                    vec2 p = (particlePos - 0.5 * canvasSize) / canvasSize.y;
+                    float influence = ball(uv, p, 0.01);  // Much larger falloff for sparse sampling
+                    
+                    if (particleType == 0) typeDist.r += influence;
+                    else if (particleType == 1) typeDist.g += influence;
+                    else if (particleType == 2) typeDist.b += influence;
+                    else if (particleType == 3) typeDist.a += influence;
+                }
+            }
+            
+            // Output the accumulated distances for each type
+            outColor = typeDist;
+        }
+    )";
+    
+    if (!metaballAccumProgram->addShaderFromSourceCode(QOpenGLShader::Vertex, accumVertexShader)) {
+        std::cerr << "Metaball accum vertex shader compilation failed: " << metaballAccumProgram->log().toStdString() << std::endl;
+    }
+    
+    if (!metaballAccumProgram->addShaderFromSourceCode(QOpenGLShader::Fragment, accumFragmentShader)) {
+        std::cerr << "Metaball accum fragment shader compilation failed: " << metaballAccumProgram->log().toStdString() << std::endl;
+    }
+    
+    if (!metaballAccumProgram->link()) {
+        std::cerr << "Metaball accum shader linking failed: " << metaballAccumProgram->log().toStdString() << std::endl;
+    } else {
+        std::cout << "Metaball accum shader linked successfully!" << std::endl;
+    }
+    
+    // Composite shader - combines all type layers with colors
+    metaballCompositeProgram = new QOpenGLShaderProgram(this);
+    
+    const char* compositeVertexShader = R"(
+        #version 150 core
+        in vec2 position;
+        in vec2 texCoord;
+        
+        out vec2 fragTexCoord;
+        
+        void main() {
+            gl_Position = vec4(position, 0.0, 1.0);
+            fragTexCoord = texCoord;
+        }
+    )";
+    
+    const char* compositeFragmentShader = R"(
+        #version 150 core
+        in vec2 fragTexCoord;
+        out vec4 outColor;
+        
+        uniform sampler2D metaballTexture;
+        uniform vec3 particleColors[4];
+        
+        void main() {
+            float threshold = 0.8;
+            
+            // Sample the metaball influences for types 0-3
+            vec4 influences = texture(metaballTexture, fragTexCoord);
+            
+            vec3 finalColor = vec3(0.0);
+            bool hasContribution = false;
+            
+            // Check each type (highest influence wins)
+            float maxInfluence = 0.0;
+            int dominantType = -1;
+            
+            for (int i = 0; i < 4; i++) {
+                float influence = influences[i];
+                if (influence > threshold && influence > maxInfluence) {
+                    maxInfluence = influence;
+                    dominantType = i;
+                }
+            }
+            
+            if (dominantType >= 0) {
+                finalColor = particleColors[dominantType];
+                hasContribution = true;
+            }
+            
+            if (hasContribution) {
+                outColor = vec4(finalColor, 1.0);
+            } else {
+                discard;
+            }
+        }
+    )";
+    
+    if (!metaballCompositeProgram->addShaderFromSourceCode(QOpenGLShader::Vertex, compositeVertexShader)) {
+        std::cerr << "Metaball composite vertex shader compilation failed: " << metaballCompositeProgram->log().toStdString() << std::endl;
+    }
+    
+    if (!metaballCompositeProgram->addShaderFromSourceCode(QOpenGLShader::Fragment, compositeFragmentShader)) {
+        std::cerr << "Metaball composite fragment shader compilation failed: " << metaballCompositeProgram->log().toStdString() << std::endl;
+    }
+    
+    if (!metaballCompositeProgram->link()) {
+        std::cerr << "Metaball composite shader linking failed: " << metaballCompositeProgram->log().toStdString() << std::endl;
+    } else {
+        std::cout << "Metaball composite shader linked successfully!" << std::endl;
+    }
+}
+
+void CellFlowWidget::initializeQuadBuffer() {
+    // Create fullscreen quad for metaball composite pass
+    quadVAO.create();
+    quadVAO.bind();
+    
+    quadVBO.create();
+    quadVBO.bind();
+    
+    float quadData[] = {
+        // Position     // TexCoord
+        -1.0f, -1.0f,   0.0f, 0.0f,
+         1.0f, -1.0f,   1.0f, 0.0f,
+        -1.0f,  1.0f,   0.0f, 1.0f,
+         1.0f,  1.0f,   1.0f, 1.0f
+    };
+    
+    quadVBO.allocate(quadData, sizeof(quadData));
+    
+    // Set up attributes for metaball accumulation program
+    metaballAccumProgram->bind();
+    metaballAccumProgram->enableAttributeArray(0);
+    metaballAccumProgram->setAttributeBuffer(0, GL_FLOAT, 0, 2, 4 * sizeof(float));
+    metaballAccumProgram->enableAttributeArray(1);
+    metaballAccumProgram->setAttributeBuffer(1, GL_FLOAT, 2 * sizeof(float), 2, 4 * sizeof(float));
+    metaballAccumProgram->release();
+    
+    quadVAO.release();
+}
+
 void CellFlowWidget::resizeGL(int w, int h) {
     windowWidth = w;
     windowHeight = h;
@@ -143,6 +338,12 @@ void CellFlowWidget::resizeGL(int w, int h) {
     params.canvasHeight = h;
     
     glViewport(0, 0, w, h);
+    
+    // Recreate metaball FBOs at new size
+    cleanupMetaballResources();
+    for (int i = 0; i < params.numParticleTypes; ++i) {
+        metaballFBOs.push_back(new QOpenGLFramebufferObject(w, h));
+    }
 }
 
 void CellFlowWidget::paintGL() {
@@ -158,39 +359,69 @@ void CellFlowWidget::paintGL() {
         return;
     }
     
-    shaderProgram->bind();
-    vao.bind();
+    // Clear any accumulated GL errors first
+    while (glGetError() != GL_NO_ERROR) { /* clear error queue */ }
     
-    // Set uniforms
-    shaderProgram->setUniformValue("canvasSize", QVector2D(params.canvasWidth, params.canvasHeight));
-    shaderProgram->setUniformValue("pointSize", params.pointSize);
-    
-    // Set particle colors
-    for (int i = 0; i < params.numParticleTypes; ++i) {
-        QString colorName = QString("particleColors[%1]").arg(i);
-        shaderProgram->setUniformValue(colorName.toStdString().c_str(), 
-            QVector3D(particleColors[i].r, particleColors[i].g, particleColors[i].b));
-    }
-    
-    // Update particle buffer
+    // Update particle buffer regardless of rendering mode
     updateParticleBuffer();
     
-    // Enable point rendering
-    glEnable(GL_PROGRAM_POINT_SIZE);
-    glPointSize(2.0f);
-    
-    // Draw particles as points
-    int particleCount = particleData.size();
-    glDrawArrays(GL_POINTS, 0, particleCount);
-    
-    // Check for errors
     GLenum err = glGetError();
     if (err != GL_NO_ERROR) {
-        std::cout << "OpenGL error: " << err << std::endl;
+        std::cout << "GL error after updateParticleBuffer: " << err << std::endl;
     }
     
-    vao.release();
-    shaderProgram->release();
+    // Choose rendering path based on metaball setting
+    if (params.metaball > 0.0f) {
+        renderMetaballs();
+        
+        err = glGetError();
+        if (err != GL_NO_ERROR) {
+            std::cout << "GL error after renderMetaballs: " << err << std::endl;
+        }
+    } else {
+        // Original point sprite rendering
+        shaderProgram->bind();
+        vao.bind();
+        
+        // Bind the particle buffer and set up vertex attributes
+        particleBuffer.bind();
+        shaderProgram->enableAttributeArray(0);
+        shaderProgram->setAttributeBuffer(0, GL_FLOAT, 0, 2, 3 * sizeof(float));
+        shaderProgram->enableAttributeArray(1);
+        shaderProgram->setAttributeBuffer(1, GL_FLOAT, 2 * sizeof(float), 1, 3 * sizeof(float));
+    
+        // Set uniforms
+        shaderProgram->setUniformValue("canvasSize", QVector2D(params.canvasWidth, params.canvasHeight));
+        shaderProgram->setUniformValue("pointSize", params.pointSize);
+    
+        // Set particle colors
+        for (int i = 0; i < params.numParticleTypes; ++i) {
+            QString colorName = QString("particleColors[%1]").arg(i);
+            shaderProgram->setUniformValue(colorName.toStdString().c_str(), 
+                QVector3D(particleColors[i].r, particleColors[i].g, particleColors[i].b));
+        }
+        
+        // Enable point rendering
+        glEnable(GL_PROGRAM_POINT_SIZE);
+        glPointSize(2.0f);
+        
+        // Draw particles as points
+        int particleCount = particleData.size();
+        glDrawArrays(GL_POINTS, 0, particleCount);
+        
+        vao.release();
+        shaderProgram->release();
+        
+        err = glGetError();
+        if (err != GL_NO_ERROR) {
+            std::cout << "GL error after point rendering: " << err << std::endl;
+        }
+    }
+    
+    err = glGetError();
+    if (err != GL_NO_ERROR) {
+        std::cout << "GL error at end of paintGL: " << err << std::endl;
+    }
     
     // Update FPS
     frameCount++;
@@ -234,6 +465,7 @@ void CellFlowWidget::updateSimulation() {
 void CellFlowWidget::updateParticleBuffer() {
     if (particleData.empty()) return;
     
+    // Just update the buffer data - no attribute setup here
     particleBuffer.bind();
     
     // Prepare data for GPU (position + type)
@@ -247,14 +479,6 @@ void CellFlowWidget::updateParticleBuffer() {
     }
     
     particleBuffer.allocate(vertexData.data(), vertexData.size() * sizeof(float));
-    
-    // Set up vertex attributes
-    shaderProgram->enableAttributeArray(0);
-    shaderProgram->setAttributeBuffer(0, GL_FLOAT, 0, 2, 3 * sizeof(float));
-    
-    shaderProgram->enableAttributeArray(1);
-    shaderProgram->setAttributeBuffer(1, GL_FLOAT, 2 * sizeof(float), 1, 3 * sizeof(float));
-    
     particleBuffer.release();
 }
 
@@ -291,6 +515,108 @@ void CellFlowWidget::generateParticleColors() {
         
         particleColors.push_back({r + m, g + m, b + m});
     }
+}
+
+void CellFlowWidget::renderMetaballs() {
+    // Check if metaball shaders are properly initialized
+    if (!metaballAccumProgram || !metaballCompositeProgram) {
+        std::cerr << "Metaball shaders not initialized!" << std::endl;
+        return;
+    }
+    
+    // Ensure we have at least one FBO for the accumulation pass
+    if (metaballFBOs.empty()) {
+        metaballFBOs.push_back(new QOpenGLFramebufferObject(windowWidth, windowHeight));
+    }
+    
+    // Create or recreate particle texture if needed
+    int textureSize = std::max(64, (int)ceil(sqrt(particleData.size())));
+    
+    if (particleTexture == 0) {
+        glGenTextures(1, &particleTexture);
+    }
+    
+    // Subsample particles for performance - use every 10th particle
+    int subsampleRate = 10;  // Use every 10th particle (10% of total)
+    int subsampledCount = (particleData.size() + subsampleRate - 1) / subsampleRate;  // Round up
+    
+    std::vector<float> textureData(textureSize * textureSize * 3, 0.0f);
+    int textureIdx = 0;
+    for (int i = 0; i < particleData.size() && textureIdx < textureSize * textureSize; i += subsampleRate) {
+        int idx = textureIdx * 3;
+        textureData[idx + 0] = particleData[i].pos.x;  // R: x position
+        textureData[idx + 1] = particleData[i].pos.y;  // G: y position
+        textureData[idx + 2] = particleData[i].ptype / 255.0f;  // B: particle type
+        textureIdx++;
+    }
+    
+    glBindTexture(GL_TEXTURE_2D, particleTexture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, textureSize, textureSize, 0, GL_RGB, GL_FLOAT, textureData.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    
+    // PASS 1: Accumulate metaball influences for types 0-3 into RGBA channels
+    metaballFBOs[0]->bind();
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    
+    metaballAccumProgram->bind();
+    quadVAO.bind();
+    
+    // Set uniforms for accumulation pass (use subsampled count)
+    metaballAccumProgram->setUniformValue("canvasSize", QVector2D(params.canvasWidth, params.canvasHeight));
+    metaballAccumProgram->setUniformValue("particleCount", subsampledCount);  // Use subsampled count
+    metaballAccumProgram->setUniformValue("textureWidth", textureSize);
+    
+    // Bind particle texture
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, particleTexture);
+    metaballAccumProgram->setUniformValue("particleTexture", 0);
+    
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    
+    quadVAO.release();
+    metaballAccumProgram->release();
+    metaballFBOs[0]->release();
+    
+    // PASS 2: Composite the RGBA channels with colors
+    glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
+    glViewport(0, 0, windowWidth, windowHeight);
+    
+    metaballCompositeProgram->bind();
+    quadVAO.bind();
+    
+    // Bind the metaball accumulation texture
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, metaballFBOs[0]->texture());
+    metaballCompositeProgram->setUniformValue("metaballTexture", 0);
+    
+    // Set particle colors for types 0-3
+    for (int i = 0; i < 4; ++i) {
+        QString colorName = QString("particleColors[%1]").arg(i);
+        metaballCompositeProgram->setUniformValue(colorName.toStdString().c_str(), 
+            QVector3D(particleColors[i].r, particleColors[i].g, particleColors[i].b));
+    }
+    
+    glDisable(GL_BLEND);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    
+    quadVAO.release();
+    metaballCompositeProgram->release();
+    
+    // Cleanup
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+}
+
+void CellFlowWidget::cleanupMetaballResources() {
+    for (auto fbo : metaballFBOs) {
+        delete fbo;
+    }
+    metaballFBOs.clear();
 }
 
 void CellFlowWidget::keyPressEvent(QKeyEvent* event) {
@@ -399,6 +725,10 @@ void CellFlowWidget::setForceOffset(float value) {
 
 void CellFlowWidget::setPointSize(float value) {
     params.pointSize = value;
+}
+
+void CellFlowWidget::setMetaball(float value) {
+    params.metaball = value;
 }
 
 void CellFlowWidget::regenerateForces() {
@@ -514,6 +844,7 @@ bool CellFlowWidget::loadPreset(const QString& filename) {
     if (obj.contains("lfoS")) params.lfoS = obj["lfoS"].toDouble();
     if (obj.contains("forceOffset")) params.forceOffset = obj["forceOffset"].toDouble();
     if (obj.contains("pointSize")) params.pointSize = obj["pointSize"].toDouble();
+    if (obj.contains("metaball")) params.metaball = obj["metaball"].toDouble();
     
     // Load particle colors
     if (obj.contains("particleColors")) {
@@ -584,6 +915,7 @@ bool CellFlowWidget::savePreset(const QString& filename) {
     obj["lfoS"] = params.lfoS;
     obj["forceOffset"] = params.forceOffset;
     obj["pointSize"] = params.pointSize;
+    obj["metaball"] = params.metaball;
     
     // Save particle colors
     QJsonArray colorsArray;

@@ -64,6 +64,7 @@ private slots:
     void onLfoSChanged(int value);
     void onForceOffsetChanged(int value);
     void onPointSizeChanged(int value);
+    void onMetaballChanged(int value);
     
     void onRegenerateClicked();
     void onResetClicked();
@@ -108,6 +109,7 @@ private:
     QSlider* lfoSSlider;
     QSlider* forceOffsetSlider;
     QSlider* pointSizeSlider;
+    QSlider* metaballSlider;
     
     // Value edits
     QLineEdit* radiusEdit;
@@ -125,6 +127,7 @@ private:
     QLineEdit* lfoSEdit;
     QLineEdit* forceOffsetEdit;
     QLineEdit* pointSizeEdit;
+    QLineEdit* metaballEdit;
     
     QLabel* fpsLabel;
     QTableWidget* particleTypeTable;
