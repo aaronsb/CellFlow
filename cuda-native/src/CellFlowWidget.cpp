@@ -413,6 +413,75 @@ void CellFlowWidget::rotateRadioByType() {
     simulation->rotateRadioByType();
 }
 
+void CellFlowWidget::deharmonizeColors() {
+    // Progressively increment each color by a random value
+    for (int i = 0; i < particleColors.size(); i++) {
+        float r = particleColors[i].r + (rand() / (float)RAND_MAX - 0.5f) * 0.2f;
+        float g = particleColors[i].g + (rand() / (float)RAND_MAX - 0.5f) * 0.2f;
+        float b = particleColors[i].b + (rand() / (float)RAND_MAX - 0.5f) * 0.2f;
+        
+        // Clamp values
+        r = fmax(0.0f, fmin(1.0f, r));
+        g = fmax(0.0f, fmin(1.0f, g));
+        b = fmax(0.0f, fmin(1.0f, b));
+        
+        particleColors[i] = {r, g, b};
+    }
+    
+    // Update shader
+    if (shaderProgram) {
+        makeCurrent();
+        for (int i = 0; i < particleColors.size() && i < params.numParticleTypes; i++) {
+            QString colorName = QString("particleColors[%1]").arg(i);
+            shaderProgram->setUniformValue(colorName.toStdString().c_str(), 
+                particleColors[i].r, particleColors[i].g, particleColors[i].b);
+        }
+        doneCurrent();
+    }
+}
+
+void CellFlowWidget::harmonizeColors() {
+    // Create harmonious colors using evenly spaced hues
+    float hueStep = 1.0f / params.numParticleTypes;
+    
+    for (int i = 0; i < particleColors.size() && i < params.numParticleTypes; i++) {
+        float hue = i * hueStep;
+        QColor color = QColor::fromHsvF(hue, 0.8f, 0.9f);
+        
+        particleColors[i].r = color.redF();
+        particleColors[i].g = color.greenF();
+        particleColors[i].b = color.blueF();
+    }
+    
+    // Update shader
+    if (shaderProgram) {
+        makeCurrent();
+        for (int i = 0; i < particleColors.size() && i < params.numParticleTypes; i++) {
+            QString colorName = QString("particleColors[%1]").arg(i);
+            shaderProgram->setUniformValue(colorName.toStdString().c_str(), 
+                particleColors[i].r, particleColors[i].g, particleColors[i].b);
+        }
+        doneCurrent();
+    }
+}
+
+void CellFlowWidget::setParticleTypeColor(int typeIndex, const QColor& color) {
+    if (typeIndex >= 0 && typeIndex < particleColors.size()) {
+        particleColors[typeIndex].r = color.redF();
+        particleColors[typeIndex].g = color.greenF();
+        particleColors[typeIndex].b = color.blueF();
+        
+        // Update shader
+        if (shaderProgram) {
+            makeCurrent();
+            QString colorName = QString("particleColors[%1]").arg(typeIndex);
+            shaderProgram->setUniformValue(colorName.toStdString().c_str(), 
+                particleColors[typeIndex].r, particleColors[typeIndex].g, particleColors[typeIndex].b);
+            doneCurrent();
+        }
+    }
+}
+
 bool CellFlowWidget::loadPreset(const QString& filename) {
     QFile file(filename);
     if (!file.open(QIODevice::ReadOnly)) {

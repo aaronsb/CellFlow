@@ -13,6 +13,31 @@
 #include <QTableWidget>
 #include <memory>
 
+// Custom widget for color manipulation
+class ColorSquareWidget : public QWidget {
+    Q_OBJECT
+public:
+    ColorSquareWidget(int typeIndex, QWidget* parent = nullptr);
+    void setColor(const QColor& color);
+    QColor getColor() const { return color; }
+
+signals:
+    void colorChanged(int typeIndex, const QColor& newColor);
+
+protected:
+    void paintEvent(QPaintEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
+
+private:
+    QColor color;
+    int typeIndex;
+    bool isDragging;
+    int startX;
+    float startHue;
+};
+
 class CellFlowWidget;
 
 class MainWindow : public QMainWindow {
@@ -47,9 +72,13 @@ private slots:
     void onSaveClicked();
     void onLoadClicked();
     
+    void onDeharmonizeClicked();
+    void onHarmonizeClicked();
+    
     void updateFPS(double fps);
     void updateParticleTypeTable();
     void onRadiusModCellChanged(int row, int column);
+    void onParticleColorChanged(int typeIndex, const QColor& newColor);
     
 private:
     void setupUI();

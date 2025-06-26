@@ -11,6 +11,56 @@
 #include <QTableWidgetItem>
 #include <QHeaderView>
 #include <QTimer>
+#include <QPainter>
+#include <QMouseEvent>
+
+// ColorSquareWidget implementation
+ColorSquareWidget::ColorSquareWidget(int typeIndex, QWidget* parent) 
+    : QWidget(parent), typeIndex(typeIndex), isDragging(false) {
+    setFixedSize(20, 20);
+    setCursor(Qt::PointingHandCursor);
+    setToolTip("Hold and drag left/right to adjust hue");
+}
+
+void ColorSquareWidget::setColor(const QColor& c) {
+    color = c;
+    update();
+}
+
+void ColorSquareWidget::paintEvent(QPaintEvent*) {
+    QPainter painter(this);
+    painter.fillRect(rect(), color);
+    painter.setPen(Qt::black);
+    painter.drawRect(rect().adjusted(0, 0, -1, -1));
+}
+
+void ColorSquareWidget::mousePressEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton) {
+        isDragging = true;
+        startX = event->x();
+        startHue = color.hueF();
+        if (startHue < 0) startHue = 0; // Handle achromatic colors
+    }
+}
+
+void ColorSquareWidget::mouseMoveEvent(QMouseEvent* event) {
+    if (isDragging) {
+        int deltaX = event->x() - startX;
+        float hueChange = deltaX / 360.0f; // 360 pixels = full hue rotation
+        
+        float newHue = startHue + hueChange;
+        while (newHue < 0) newHue += 1.0f;
+        while (newHue > 1.0f) newHue -= 1.0f;
+        
+        color.setHsvF(newHue, color.saturationF(), color.valueF());
+        update();
+        emit colorChanged(typeIndex, color);
+    }
+}
+
+void ColorSquareWidget::mouseReleaseEvent(QMouseEvent*) {
+    isDragging = false;
+}
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setupUI();
@@ -147,13 +197,28 @@ void MainWindow::setupUI() {
     
     controlLayout->addWidget(buttonsGroup);
     
+    // Color controls
+    QGroupBox* colorGroup = new QGroupBox("Colors", this);
+    QHBoxLayout* colorLayout = new QHBoxLayout(colorGroup);
+    
+    QPushButton* deharmonizeButton = new QPushButton("De-harmonize", this);
+    QPushButton* harmonizeButton = new QPushButton("Harmonize", this);
+    
+    connect(deharmonizeButton, &QPushButton::clicked, this, &MainWindow::onDeharmonizeClicked);
+    connect(harmonizeButton, &QPushButton::clicked, this, &MainWindow::onHarmonizeClicked);
+    
+    colorLayout->addWidget(deharmonizeButton);
+    colorLayout->addWidget(harmonizeButton);
+    
+    controlLayout->addWidget(colorGroup);
+    
     // Particle Type Status
     QGroupBox* statusGroup = new QGroupBox("Particle Type Status", this);
     QVBoxLayout* statusLayout = new QVBoxLayout(statusGroup);
     
     particleTypeTable = new QTableWidget(this);
-    particleTypeTable->setColumnCount(3);
-    particleTypeTable->setHorizontalHeaderLabels(QStringList() << "Type" << "Count" << "Radius Mod");
+    particleTypeTable->setColumnCount(4);
+    particleTypeTable->setHorizontalHeaderLabels(QStringList() << "Type" << "Color" << "Count" << "Radius Mod");
     particleTypeTable->horizontalHeader()->setStretchLastSection(true);
     // Table will resize dynamically based on content
     particleTypeTable->setAlternatingRowColors(true);
@@ -427,19 +492,28 @@ void MainWindow::updateParticleTypeTable() {
         typeItem->setFlags(typeItem->flags() & ~Qt::ItemIsEditable);
         particleTypeTable->setItem(i, 0, typeItem);
         
+        // Color square column
+        ColorSquareWidget* colorSquare = new ColorSquareWidget(i, this);
+        if (i < colors.size()) {
+            colorSquare->setColor(colors[i]);
+        }
+        connect(colorSquare, &ColorSquareWidget::colorChanged, 
+                this, &MainWindow::onParticleColorChanged);
+        particleTypeTable->setCellWidget(i, 1, colorSquare);
+        
         // Count column (not editable)
         int count = (i < typeCounts.size()) ? typeCounts[i] : 0;
         QTableWidgetItem* countItem = new QTableWidgetItem(QString::number(count));
         countItem->setTextAlignment(Qt::AlignCenter);
         countItem->setFlags(countItem->flags() & ~Qt::ItemIsEditable);
-        particleTypeTable->setItem(i, 1, countItem);
+        particleTypeTable->setItem(i, 2, countItem);
         
         // Radius modifier column (editable)
         float radiusMod = (i < radioByType.size()) ? radioByType[i] : 0.0f;
         QTableWidgetItem* radiusItem = new QTableWidgetItem(QString("%1").arg(radiusMod, 0, 'f', 2));
         radiusItem->setTextAlignment(Qt::AlignCenter);
         radiusItem->setToolTip("Double-click to edit (-1.0 to 1.0)");
-        particleTypeTable->setItem(i, 2, radiusItem);
+        particleTypeTable->setItem(i, 3, radiusItem);
     }
     
     particleTypeTable->resizeColumnsToContents();
@@ -454,8 +528,8 @@ void MainWindow::updateParticleTypeTable() {
 }
 
 void MainWindow::onRadiusModCellChanged(int row, int column) {
-    // Only handle changes to the Radius Mod column (column 2)
-    if (column != 2) return;
+    // Only handle changes to the Radius Mod column (now column 3)
+    if (column != 3) return;
     
     QTableWidgetItem* item = particleTypeTable->item(row, column);
     if (!item) return;
@@ -474,3 +548,26 @@ void MainWindow::onRadiusModCellChanged(int row, int column) {
         }
     }
 }
+
+void MainWindow::onDeharmonizeClicked() {
+    cellFlowWidget->deharmonizeColors();
+    updateParticleTypeTable();
+    statusBar()->showMessage("Colors de-harmonized", 2000);
+}
+
+void MainWindow::onHarmonizeClicked() {
+    cellFlowWidget->harmonizeColors();
+    updateParticleTypeTable();
+    statusBar()->showMessage("Colors harmonized", 2000);
+}
+
+void MainWindow::onParticleColorChanged(int typeIndex, const QColor& newColor) {
+    cellFlowWidget->setParticleTypeColor(typeIndex, newColor);
+    // Update the type name color in the first column
+    QTableWidgetItem* typeItem = particleTypeTable->item(typeIndex, 0);
+    if (typeItem) {
+        typeItem->setForeground(QBrush(newColor));
+    }
+}
+
+#include "moc_MainWindow.cpp"
