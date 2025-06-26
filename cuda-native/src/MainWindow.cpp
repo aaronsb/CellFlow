@@ -37,7 +37,7 @@ void ColorSquareWidget::paintEvent(QPaintEvent*) {
 void ColorSquareWidget::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
         isDragging = true;
-        startX = event->x();
+        startX = event->position().x();
         startHue = color.hueF();
         if (startHue < 0) startHue = 0; // Handle achromatic colors
     }
@@ -45,7 +45,7 @@ void ColorSquareWidget::mousePressEvent(QMouseEvent* event) {
 
 void ColorSquareWidget::mouseMoveEvent(QMouseEvent* event) {
     if (isDragging) {
-        int deltaX = event->x() - startX;
+        int deltaX = event->position().x() - startX;
         float hueChange = deltaX / 360.0f; // 360 pixels = full hue rotation
         
         float newHue = startHue + hueChange;
@@ -92,7 +92,7 @@ void MainWindow::setupUI() {
     // Create control panel
     QScrollArea* scrollArea = new QScrollArea(this);
     scrollArea->setWidgetResizable(true);
-    scrollArea->setMaximumWidth(400);
+    scrollArea->setMaximumWidth(450);
     
     QWidget* controlPanel = new QWidget();
     QVBoxLayout* controlLayout = new QVBoxLayout(controlPanel);
@@ -224,7 +224,9 @@ void MainWindow::setupUI() {
     particleTypeTable->setAlternatingRowColors(true);
     particleTypeTable->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
     particleTypeTable->setSelectionBehavior(QAbstractItemView::SelectRows);
-    particleTypeTable->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    particleTypeTable->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    particleTypeTable->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    particleTypeTable->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     
     // Connect cell changed signal to update radius modifiers
     connect(particleTypeTable, &QTableWidget::cellChanged, 
@@ -517,14 +519,17 @@ void MainWindow::updateParticleTypeTable() {
     }
     
     particleTypeTable->resizeColumnsToContents();
+    // Ensure color column has enough space for the square widget
+    particleTypeTable->setColumnWidth(1, 40);
     
     // Resize table height to fit content
     int rowHeight = particleTypeTable->rowHeight(0);
     int headerHeight = particleTypeTable->horizontalHeader()->height();
     int frameWidth = particleTypeTable->frameWidth() * 2;
-    int totalHeight = headerHeight + (rowHeight * numTypes) + frameWidth + 2;
+    int totalHeight = headerHeight + (rowHeight * numTypes) + frameWidth + 4;
     
-    particleTypeTable->setFixedHeight(totalHeight);
+    particleTypeTable->setMinimumHeight(totalHeight);
+    particleTypeTable->setMaximumHeight(totalHeight);
 }
 
 void MainWindow::onRadiusModCellChanged(int row, int column) {
