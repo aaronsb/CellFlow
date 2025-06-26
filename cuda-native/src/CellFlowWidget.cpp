@@ -91,7 +91,7 @@ void CellFlowWidget::initializeShaders() {
             normalizedPos.y = -normalizedPos.y; // Flip Y coordinate
             
             gl_Position = vec4(normalizedPos, 0.0, 1.0);
-            gl_PointSize = 2.0;
+            gl_PointSize = 4.0;
             
             fragColor = particleColors[int(particleType)];
         }
