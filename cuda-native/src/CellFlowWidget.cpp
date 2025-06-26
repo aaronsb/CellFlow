@@ -312,6 +312,9 @@ void CellFlowWidget::keyPressEvent(QKeyEvent* event) {
         case Qt::Key_Space:
             regenerateForces();
             break;
+        case Qt::Key_X:
+            rotateRadioByType();
+            break;
         case Qt::Key_1:
         case Qt::Key_2:
         case Qt::Key_3:
@@ -335,6 +338,39 @@ void CellFlowWidget::setParticleCount(int count) {
 void CellFlowWidget::setNumParticleTypes(int types) {
     params.numParticleTypes = types;
     simulation->setNumParticleTypes(types);
+}
+
+int CellFlowWidget::getParticleCount() const {
+    return simulation->getParticleCount();
+}
+
+std::vector<QColor> CellFlowWidget::getParticleColors() const {
+    std::vector<QColor> colors;
+    for (const auto& pc : particleColors) {
+        colors.push_back(QColor::fromRgbF(pc.r, pc.g, pc.b));
+    }
+    return colors;
+}
+
+std::vector<int> CellFlowWidget::getParticleTypeCounts() const {
+    std::vector<int> counts(params.numParticleTypes, 0);
+    
+    // Count particles by type
+    for (const auto& particle : particleData) {
+        if (particle.ptype < params.numParticleTypes) {
+            counts[particle.ptype]++;
+        }
+    }
+    
+    return counts;
+}
+
+std::vector<float> CellFlowWidget::getRadioByType() const {
+    return simulation->getRadioByType();
+}
+
+void CellFlowWidget::setRadioByTypeValue(int index, float value) {
+    simulation->setRadioByTypeValue(index, value);
 }
 
 void CellFlowWidget::setRadius(float value) { params.radius = value; }
@@ -371,6 +407,10 @@ void CellFlowWidget::regenerateForces() {
 
 void CellFlowWidget::resetSimulation() {
     simulation->initializeParticles();
+}
+
+void CellFlowWidget::rotateRadioByType() {
+    simulation->rotateRadioByType();
 }
 
 bool CellFlowWidget::loadPreset(const QString& filename) {

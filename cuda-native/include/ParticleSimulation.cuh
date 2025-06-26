@@ -44,6 +44,13 @@ public:
     // Move universe (for arrow key movement)
     void moveUniverse(float dx, float dy);
     
+    // Rotate radius modifiers
+    void rotateRadioByType();
+    
+    // Get/Set radioByType values
+    std::vector<float> getRadioByType() const;
+    void setRadioByTypeValue(int index, float value);
+    
 private:
     int particleCount;
     int numParticleTypes;

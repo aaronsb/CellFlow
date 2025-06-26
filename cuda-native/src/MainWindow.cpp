@@ -6,12 +6,20 @@
 #include <QScrollArea>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QKeyEvent>
+#include <QStatusBar>
+#include <QTableWidgetItem>
+#include <QHeaderView>
+#include <QTimer>
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setupUI();
     
     // Load preset 1 by default
     cellFlowWidget->loadPreset("presets/1.json");
+    
+    // Initial update of particle type table
+    updateParticleTypeTable();
 }
 
 void MainWindow::setupUI() {
@@ -25,6 +33,11 @@ void MainWindow::setupUI() {
     cellFlowWidget = new CellFlowWidget(this);
     cellFlowWidget->setMinimumSize(800, 600);
     connect(cellFlowWidget, &CellFlowWidget::fpsChanged, this, &MainWindow::updateFPS);
+    
+    // Create timer to update particle counts periodically
+    QTimer* updateTimer = new QTimer(this);
+    connect(updateTimer, &QTimer::timeout, this, &MainWindow::updateParticleTypeTable);
+    updateTimer->start(5000); // Update every 5 seconds
     
     // Create control panel
     QScrollArea* scrollArea = new QScrollArea(this);
@@ -44,18 +57,19 @@ void MainWindow::setupUI() {
     QGridLayout* particleLayout = new QGridLayout(particleGroup);
     
     particleLayout->addWidget(new QLabel("Count:"), 0, 0);
-    particleCountSpinBox = new QSpinBox(this);
-    particleCountSpinBox->setRange(500, 100000);
-    particleCountSpinBox->setSingleStep(1000);
-    particleCountSpinBox->setValue(4000);
-    connect(particleCountSpinBox, QOverload<int>::of(&QSpinBox::valueChanged),
-            this, &MainWindow::onParticleCountChanged);
-    particleLayout->addWidget(particleCountSpinBox, 0, 1);
+    particleCountEdit = new QLineEdit(this);
+    particleCountEdit->setText("4000");
+    particleCountEdit->setValidator(new QIntValidator(500, 100000, this));
+    particleCountEdit->setMaximumWidth(100);
+    connect(particleCountEdit, &QLineEdit::returnPressed,
+            this, &MainWindow::onParticleCountConfirmed);
+    particleLayout->addWidget(particleCountEdit, 0, 1);
     
     particleLayout->addWidget(new QLabel("Types:"), 1, 0);
     particleTypesSpinBox = new QSpinBox(this);
     particleTypesSpinBox->setRange(2, 10);
     particleTypesSpinBox->setValue(6);
+    particleTypesSpinBox->setMaximumWidth(100);
     connect(particleTypesSpinBox, QOverload<int>::of(&QSpinBox::valueChanged),
             this, &MainWindow::onParticleTypesChanged);
     particleLayout->addWidget(particleTypesSpinBox, 1, 1);
@@ -66,12 +80,12 @@ void MainWindow::setupUI() {
     QGroupBox* physicsGroup = new QGroupBox("Physics Parameters", this);
     QVBoxLayout* physicsLayout = new QVBoxLayout(physicsGroup);
     
-    physicsLayout->addWidget(createControlGroup("Radius", radiusSlider, radiusLabel, 10, 125, 50.0));
-    physicsLayout->addWidget(createControlGroup("Time", deltaTSlider, deltaTLabel, 0.01, 0.35, 0.22));
-    physicsLayout->addWidget(createControlGroup("Friction", frictionSlider, frictionLabel, 0.0, 1.0, 0.71));
-    physicsLayout->addWidget(createControlGroup("Repulsion", repulsionSlider, repulsionLabel, 2.0, 200.0, 50.0));
-    physicsLayout->addWidget(createControlGroup("Attraction", attractionSlider, attractionLabel, 0.1, 4.0, 0.62));
-    physicsLayout->addWidget(createControlGroup("K", kSlider, kLabel, 1.5, 30.0, 16.57));
+    physicsLayout->addWidget(createControlGroup("Radius", radiusSlider, radiusEdit, 10, 125, 50.0));
+    physicsLayout->addWidget(createControlGroup("Time", deltaTSlider, deltaTEdit, 0.01, 0.35, 0.22));
+    physicsLayout->addWidget(createControlGroup("Friction", frictionSlider, frictionEdit, 0.0, 1.0, 0.71));
+    physicsLayout->addWidget(createControlGroup("Repulsion", repulsionSlider, repulsionEdit, 2.0, 200.0, 50.0));
+    physicsLayout->addWidget(createControlGroup("Attraction", attractionSlider, attractionEdit, 0.1, 4.0, 0.62));
+    physicsLayout->addWidget(createControlGroup("K", kSlider, kEdit, 1.5, 30.0, 16.57));
     
     controlLayout->addWidget(physicsGroup);
     
@@ -79,11 +93,11 @@ void MainWindow::setupUI() {
     QGroupBox* advancedGroup = new QGroupBox("Advanced Parameters", this);
     QVBoxLayout* advancedLayout = new QVBoxLayout(advancedGroup);
     
-    advancedLayout->addWidget(createControlGroup("F_Range", forceRangeSlider, forceRangeLabel, -1.0, 1.0, 0.28));
-    advancedLayout->addWidget(createControlGroup("F_Bias", forceBiasSlider, forceBiasLabel, -1.0, 0.0, -0.20));
-    advancedLayout->addWidget(createControlGroup("Ratio", ratioSlider, ratioLabel, -2.0, 2.0, 0.0));
-    advancedLayout->addWidget(createControlGroup("LFOA", lfoASlider, lfoALabel, -1.0, 1.0, 0.0));
-    advancedLayout->addWidget(createControlGroup("LFOS", lfoSSlider, lfoSLabel, 0.1, 10.0, 0.1));
+    advancedLayout->addWidget(createControlGroup("F_Range", forceRangeSlider, forceRangeEdit, -1.0, 1.0, 0.28));
+    advancedLayout->addWidget(createControlGroup("F_Bias", forceBiasSlider, forceBiasEdit, -1.0, 0.0, -0.20));
+    advancedLayout->addWidget(createControlGroup("Ratio", ratioSlider, ratioEdit, -2.0, 2.0, 0.0));
+    advancedLayout->addWidget(createControlGroup("LFOA", lfoASlider, lfoAEdit, -1.0, 1.0, 0.0));
+    advancedLayout->addWidget(createControlGroup("LFOS", lfoSSlider, lfoSEdit, 0.1, 10.0, 0.1));
     
     controlLayout->addWidget(advancedGroup);
     
@@ -91,7 +105,7 @@ void MainWindow::setupUI() {
     QGroupBox* renderGroup = new QGroupBox("Rendering", this);
     QVBoxLayout* renderLayout = new QVBoxLayout(renderGroup);
     
-    renderLayout->addWidget(createControlGroup("Point Size", pointSizeSlider, pointSizeLabel, 1.0, 10.0, 4.0, 0.5));
+    renderLayout->addWidget(createControlGroup("Point Size", pointSizeSlider, pointSizeEdit, 1.0, 10.0, 4.0, 0.5));
     
     controlLayout->addWidget(renderGroup);
     
@@ -99,9 +113,9 @@ void MainWindow::setupUI() {
     QGroupBox* adaptiveGroup = new QGroupBox("Adaptive Parameters", this);
     QVBoxLayout* adaptiveLayout = new QVBoxLayout(adaptiveGroup);
     
-    adaptiveLayout->addWidget(createControlGroup("F_Mult", forceMultiplierSlider, forceMultiplierLabel, 0.0, 5.0, 2.33));
-    adaptiveLayout->addWidget(createControlGroup("Balance", balanceSlider, balanceLabel, 0.01, 1.5, 0.79));
-    adaptiveLayout->addWidget(createControlGroup("F_Offset", forceOffsetSlider, forceOffsetLabel, -1.0, 1.0, 0.0));
+    adaptiveLayout->addWidget(createControlGroup("F_Mult", forceMultiplierSlider, forceMultiplierEdit, 0.0, 5.0, 2.33));
+    adaptiveLayout->addWidget(createControlGroup("Balance", balanceSlider, balanceEdit, 0.01, 1.5, 0.79));
+    adaptiveLayout->addWidget(createControlGroup("F_Offset", forceOffsetSlider, forceOffsetEdit, -1.0, 1.0, 0.0));
     
     controlLayout->addWidget(adaptiveGroup);
     
@@ -121,19 +135,6 @@ void MainWindow::setupUI() {
     buttonsLayout->addWidget(resetButton, 0, 1);
     buttonsLayout->addWidget(rexButton, 0, 2);
     
-    // Increment controls
-    QPushButton* incrementDownBtn = new QPushButton("▼", this);
-    incrementLabel = new QLabel("0.010", this);
-    incrementLabel->setAlignment(Qt::AlignCenter);
-    QPushButton* incrementUpBtn = new QPushButton("▲", this);
-    
-    connect(incrementDownBtn, &QPushButton::clicked, this, &MainWindow::onIncrementDown);
-    connect(incrementUpBtn, &QPushButton::clicked, this, &MainWindow::onIncrementUp);
-    
-    buttonsLayout->addWidget(incrementDownBtn, 1, 0);
-    buttonsLayout->addWidget(incrementLabel, 1, 1);
-    buttonsLayout->addWidget(incrementUpBtn, 1, 2);
-    
     // Save/Load buttons
     QPushButton* saveButton = new QPushButton("Save", this);
     QPushButton* loadButton = new QPushButton("Load", this);
@@ -141,10 +142,31 @@ void MainWindow::setupUI() {
     connect(saveButton, &QPushButton::clicked, this, &MainWindow::onSaveClicked);
     connect(loadButton, &QPushButton::clicked, this, &MainWindow::onLoadClicked);
     
-    buttonsLayout->addWidget(saveButton, 2, 0, 1, 2);
-    buttonsLayout->addWidget(loadButton, 2, 2);
+    buttonsLayout->addWidget(saveButton, 1, 0, 1, 2);
+    buttonsLayout->addWidget(loadButton, 1, 2);
     
     controlLayout->addWidget(buttonsGroup);
+    
+    // Particle Type Status
+    QGroupBox* statusGroup = new QGroupBox("Particle Type Status", this);
+    QVBoxLayout* statusLayout = new QVBoxLayout(statusGroup);
+    
+    particleTypeTable = new QTableWidget(this);
+    particleTypeTable->setColumnCount(3);
+    particleTypeTable->setHorizontalHeaderLabels(QStringList() << "Type" << "Count" << "Radius Mod");
+    particleTypeTable->horizontalHeader()->setStretchLastSection(true);
+    // Table will resize dynamically based on content
+    particleTypeTable->setAlternatingRowColors(true);
+    particleTypeTable->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
+    particleTypeTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    particleTypeTable->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    
+    // Connect cell changed signal to update radius modifiers
+    connect(particleTypeTable, &QTableWidget::cellChanged, 
+            this, &MainWindow::onRadiusModCellChanged);
+    
+    statusLayout->addWidget(particleTypeTable);
+    controlLayout->addWidget(statusGroup);
     
     // Add stretch at the bottom
     controlLayout->addStretch();
@@ -158,11 +180,12 @@ void MainWindow::setupUI() {
     
     // Set window properties
     setWindowTitle("CellFlow CUDA");
-    resize(1400, 900);
+    // Set 4:3 ratio window size large enough for all controls
+    resize(1600, 1200);
 }
 
 QWidget* MainWindow::createControlGroup(const QString& label, QSlider*& slider, 
-                                      QLabel*& valueLabel, double min, double max, 
+                                      QLineEdit*& valueEdit, double min, double max, 
                                       double value, double step) {
     QWidget* widget = new QWidget(this);
     QHBoxLayout* layout = new QHBoxLayout(widget);
@@ -178,10 +201,20 @@ QWidget* MainWindow::createControlGroup(const QString& label, QSlider*& slider,
     slider->setValue(static_cast<int>((value - min) / step));
     layout->addWidget(slider);
     
-    valueLabel = new QLabel(QString::number(value, 'f', 2), this);
-    valueLabel->setMinimumWidth(60);
-    valueLabel->setAlignment(Qt::AlignRight);
-    layout->addWidget(valueLabel);
+    valueEdit = new QLineEdit(this);
+    valueEdit->setText(QString::number(value, 'f', 2));
+    valueEdit->setMaximumWidth(80);
+    valueEdit->setAlignment(Qt::AlignRight);
+    
+    // Set up validator
+    QDoubleValidator* validator = new QDoubleValidator(min, max, 6, this);
+    validator->setNotation(QDoubleValidator::StandardNotation);
+    valueEdit->setValidator(validator);
+    
+    layout->addWidget(valueEdit);
+    
+    // Connect slider and edit for bidirectional updates
+    connectSliderAndEdit(slider, valueEdit, min, step);
     
     // Connect appropriate slot based on parameter name
     if (label == "Radius") connect(slider, &QSlider::valueChanged, this, &MainWindow::onRadiusChanged);
@@ -203,135 +236,131 @@ QWidget* MainWindow::createControlGroup(const QString& label, QSlider*& slider,
     return widget;
 }
 
-void MainWindow::updateSliderValue(QSlider* slider, QLabel* label, double value, int decimals) {
-    label->setText(QString::number(value, 'f', decimals));
+void MainWindow::connectSliderAndEdit(QSlider* slider, QLineEdit* edit, double min, double step) {
+    // Update edit when slider changes
+    connect(slider, &QSlider::valueChanged, [=](int value) {
+        double realValue = min + value * step;
+        edit->setText(QString::number(realValue, 'f', 2));
+    });
+    
+    // Update slider when edit changes (on Enter press)
+    connect(edit, &QLineEdit::returnPressed, [=]() {
+        bool ok;
+        double value = edit->text().toDouble(&ok);
+        if (ok) {
+            int sliderValue = static_cast<int>((value - min) / step);
+            slider->setValue(sliderValue);
+        }
+    });
 }
 
 // Slot implementations
-void MainWindow::onParticleCountChanged(int value) {
-    cellFlowWidget->setParticleCount(value);
+void MainWindow::onParticleCountConfirmed() {
+    bool ok;
+    int value = particleCountEdit->text().toInt(&ok);
+    if (ok) {
+        cellFlowWidget->setParticleCount(value);
+        cellFlowWidget->regenerateForces();  // Regenerate after confirming count
+        updateParticleTypeTable();
+    }
 }
 
 void MainWindow::onParticleTypesChanged(int value) {
     cellFlowWidget->setNumParticleTypes(value);
+    cellFlowWidget->regenerateForces();  // Regenerate after changing types
+    updateParticleTypeTable();
 }
 
 void MainWindow::onRadiusChanged(int value) {
     double v = 10.0 + value * 0.1;
     cellFlowWidget->setRadius(v);
-    updateSliderValue(radiusSlider, radiusLabel, v, 1);
 }
 
 void MainWindow::onDeltaTChanged(int value) {
     double v = 0.01 + value * 0.01;
     cellFlowWidget->setDeltaT(v);
-    updateSliderValue(deltaTSlider, deltaTLabel, v);
 }
 
 void MainWindow::onFrictionChanged(int value) {
     double v = value * 0.01;
     cellFlowWidget->setFriction(v);
-    updateSliderValue(frictionSlider, frictionLabel, v);
 }
 
 void MainWindow::onRepulsionChanged(int value) {
     double v = 2.0 + value * 0.1;
     cellFlowWidget->setRepulsion(v);
-    updateSliderValue(repulsionSlider, repulsionLabel, v);
 }
 
 void MainWindow::onAttractionChanged(int value) {
     double v = 0.1 + value * 0.01;
     cellFlowWidget->setAttraction(v);
-    updateSliderValue(attractionSlider, attractionLabel, v);
 }
 
 void MainWindow::onKChanged(int value) {
     double v = 1.5 + value * 0.01;
     cellFlowWidget->setK(v);
-    updateSliderValue(kSlider, kLabel, v);
 }
 
 void MainWindow::onBalanceChanged(int value) {
     double v = 0.01 + value * 0.01;
     cellFlowWidget->setBalance(v);
-    updateSliderValue(balanceSlider, balanceLabel, v, 3);
 }
 
 void MainWindow::onForceMultiplierChanged(int value) {
     double v = value * 0.01;
     cellFlowWidget->setForceMultiplier(v);
-    updateSliderValue(forceMultiplierSlider, forceMultiplierLabel, v);
 }
 
 void MainWindow::onForceRangeChanged(int value) {
     double v = -1.0 + value * 0.01;
     cellFlowWidget->setForceRange(v);
-    updateSliderValue(forceRangeSlider, forceRangeLabel, v);
 }
 
 void MainWindow::onForceBiasChanged(int value) {
     double v = -1.0 + value * 0.01;
     cellFlowWidget->setForceBias(v);
-    updateSliderValue(forceBiasSlider, forceBiasLabel, v);
 }
 
 void MainWindow::onRatioChanged(int value) {
     double v = -2.0 + value * 0.01;
     cellFlowWidget->setRatio(v);
-    updateSliderValue(ratioSlider, ratioLabel, v);
 }
 
 void MainWindow::onLfoAChanged(int value) {
     double v = -1.0 + value * 0.01;
     cellFlowWidget->setLfoA(v);
-    updateSliderValue(lfoASlider, lfoALabel, v);
 }
 
 void MainWindow::onLfoSChanged(int value) {
     double v = 0.1 + value * 0.01;
     cellFlowWidget->setLfoS(v);
-    updateSliderValue(lfoSSlider, lfoSLabel, v);
 }
 
 void MainWindow::onForceOffsetChanged(int value) {
     double v = -1.0 + value * 0.01;
     cellFlowWidget->setForceOffset(v);
-    updateSliderValue(forceOffsetSlider, forceOffsetLabel, v);
 }
 
 void MainWindow::onPointSizeChanged(int value) {
     double v = 1.0 + value * 0.5;
     cellFlowWidget->setPointSize(v);
-    updateSliderValue(pointSizeSlider, pointSizeLabel, v, 1);
 }
 
 void MainWindow::onRegenerateClicked() {
     cellFlowWidget->regenerateForces();
+    updateParticleTypeTable();
 }
 
 void MainWindow::onResetClicked() {
     cellFlowWidget->resetSimulation();
+    updateParticleTypeTable();
 }
 
 void MainWindow::onReXClicked() {
-    // Cycle radius (implement if needed)
-}
-
-void MainWindow::onIncrementUp() {
-    if (currentIncrementIndex < 5) {
-        currentIncrementIndex++;
-        currentIncrement = incrementSteps[currentIncrementIndex];
-        incrementLabel->setText(QString::number(currentIncrement, 'f', 3));
-    }
-}
-
-void MainWindow::onIncrementDown() {
-    if (currentIncrementIndex > 0) {
-        currentIncrementIndex--;
-        currentIncrement = incrementSteps[currentIncrementIndex];
-        incrementLabel->setText(QString::number(currentIncrement, 'f', 3));
-    }
+    cellFlowWidget->rotateRadioByType();
+    updateParticleTypeTable();
+    // Show brief status message
+    statusBar()->showMessage("Shifted interaction distances between particle types", 2000);
 }
 
 void MainWindow::onSaveClicked() {
@@ -351,8 +380,20 @@ void MainWindow::onLoadClicked() {
         if (cellFlowWidget->loadPreset(filename)) {
             // Update UI controls to match loaded values
             const SimulationParams& params = cellFlowWidget->getParams();
-            particleCountSpinBox->setValue(cellFlowWidget->getParams().numParticleTypes);
-            // Update other controls as needed
+            particleCountEdit->setText(QString::number(cellFlowWidget->getParticleCount()));
+            particleTypesSpinBox->setValue(params.numParticleTypes);
+            
+            // Update sliders - they will automatically update the edit boxes
+            radiusSlider->setValue(static_cast<int>((params.radius - 10.0) / 0.1));
+            deltaTSlider->setValue(static_cast<int>((params.delta_t - 0.01) / 0.01));
+            frictionSlider->setValue(static_cast<int>(params.friction / 0.01));
+            repulsionSlider->setValue(static_cast<int>((params.repulsion - 2.0) / 0.1));
+            attractionSlider->setValue(static_cast<int>((params.attraction - 0.1) / 0.01));
+            kSlider->setValue(static_cast<int>((params.k - 1.5) / 0.01));
+            balanceSlider->setValue(static_cast<int>((params.balance - 0.01) / 0.01));
+            forceMultiplierSlider->setValue(static_cast<int>(params.forceMultiplier / 0.01));
+            // Add other sliders as needed
+            updateParticleTypeTable();
         } else {
             QMessageBox::warning(this, "Error", "Failed to load preset!");
         }
@@ -361,4 +402,75 @@ void MainWindow::onLoadClicked() {
 
 void MainWindow::updateFPS(double fps) {
     fpsLabel->setText(QString("FPS: %1").arg(fps, 0, 'f', 1));
+}
+
+void MainWindow::updateParticleTypeTable() {
+    // Get particle data from simulation
+    const SimulationParams& params = cellFlowWidget->getParams();
+    int numTypes = params.numParticleTypes;
+    
+    // Update table rows
+    particleTypeTable->setRowCount(numTypes);
+    
+    // Get particle colors and counts
+    std::vector<QColor> colors = cellFlowWidget->getParticleColors();
+    std::vector<int> typeCounts = cellFlowWidget->getParticleTypeCounts();
+    std::vector<float> radioByType = cellFlowWidget->getRadioByType();
+    
+    for (int i = 0; i < numTypes; i++) {
+        // Type column with color (not editable)
+        QTableWidgetItem* typeItem = new QTableWidgetItem(QString("Type %1").arg(i + 1));
+        if (i < colors.size()) {
+            typeItem->setForeground(QBrush(colors[i]));
+            typeItem->setFont(QFont("", -1, QFont::Bold));
+        }
+        typeItem->setFlags(typeItem->flags() & ~Qt::ItemIsEditable);
+        particleTypeTable->setItem(i, 0, typeItem);
+        
+        // Count column (not editable)
+        int count = (i < typeCounts.size()) ? typeCounts[i] : 0;
+        QTableWidgetItem* countItem = new QTableWidgetItem(QString::number(count));
+        countItem->setTextAlignment(Qt::AlignCenter);
+        countItem->setFlags(countItem->flags() & ~Qt::ItemIsEditable);
+        particleTypeTable->setItem(i, 1, countItem);
+        
+        // Radius modifier column (editable)
+        float radiusMod = (i < radioByType.size()) ? radioByType[i] : 0.0f;
+        QTableWidgetItem* radiusItem = new QTableWidgetItem(QString("%1").arg(radiusMod, 0, 'f', 2));
+        radiusItem->setTextAlignment(Qt::AlignCenter);
+        radiusItem->setToolTip("Double-click to edit (-1.0 to 1.0)");
+        particleTypeTable->setItem(i, 2, radiusItem);
+    }
+    
+    particleTypeTable->resizeColumnsToContents();
+    
+    // Resize table height to fit content
+    int rowHeight = particleTypeTable->rowHeight(0);
+    int headerHeight = particleTypeTable->horizontalHeader()->height();
+    int frameWidth = particleTypeTable->frameWidth() * 2;
+    int totalHeight = headerHeight + (rowHeight * numTypes) + frameWidth + 2;
+    
+    particleTypeTable->setFixedHeight(totalHeight);
+}
+
+void MainWindow::onRadiusModCellChanged(int row, int column) {
+    // Only handle changes to the Radius Mod column (column 2)
+    if (column != 2) return;
+    
+    QTableWidgetItem* item = particleTypeTable->item(row, column);
+    if (!item) return;
+    
+    bool ok;
+    float newValue = item->text().toFloat(&ok);
+    
+    if (ok && newValue >= -1.0f && newValue <= 1.0f) {
+        // Update the radius modifier for this particle type
+        cellFlowWidget->setRadioByTypeValue(row, newValue);
+    } else {
+        // Invalid value, restore the original
+        std::vector<float> radioByType = cellFlowWidget->getRadioByType();
+        if (row < radioByType.size()) {
+            item->setText(QString("%1").arg(radioByType[row], 0, 'f', 2));
+        }
+    }
 }

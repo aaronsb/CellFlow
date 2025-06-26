@@ -4,10 +4,13 @@
 #include <QMainWindow>
 #include <QSlider>
 #include <QLabel>
+#include <QLineEdit>
 #include <QSpinBox>
-#include <QDoubleSpinBox>
+#include <QDoubleValidator>
+#include <QIntValidator>
 #include <QPushButton>
 #include <QGroupBox>
+#include <QTableWidget>
 #include <memory>
 
 class CellFlowWidget;
@@ -19,7 +22,7 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
 
 private slots:
-    void onParticleCountChanged(int value);
+    void onParticleCountConfirmed();
     void onParticleTypesChanged(int value);
     void onRadiusChanged(int value);
     void onDeltaTChanged(int value);
@@ -41,25 +44,24 @@ private slots:
     void onResetClicked();
     void onReXClicked();
     
-    void onIncrementUp();
-    void onIncrementDown();
-    
     void onSaveClicked();
     void onLoadClicked();
     
     void updateFPS(double fps);
+    void updateParticleTypeTable();
+    void onRadiusModCellChanged(int row, int column);
     
 private:
     void setupUI();
     QWidget* createControlGroup(const QString& label, QSlider*& slider, 
-                               QLabel*& valueLabel, double min, double max, 
+                               QLineEdit*& valueEdit, double min, double max, 
                                double value, double step = 0.01);
-    void updateSliderValue(QSlider* slider, QLabel* label, double value, int decimals = 2);
+    void connectSliderAndEdit(QSlider* slider, QLineEdit* edit, double min, double step);
     
     CellFlowWidget* cellFlowWidget;
     
     // Control widgets
-    QSpinBox* particleCountSpinBox;
+    QLineEdit* particleCountEdit;
     QSpinBox* particleTypesSpinBox;
     
     QSlider* radiusSlider;
@@ -78,30 +80,25 @@ private:
     QSlider* forceOffsetSlider;
     QSlider* pointSizeSlider;
     
-    // Value labels
-    QLabel* radiusLabel;
-    QLabel* deltaTLabel;
-    QLabel* frictionLabel;
-    QLabel* repulsionLabel;
-    QLabel* attractionLabel;
-    QLabel* kLabel;
-    QLabel* balanceLabel;
-    QLabel* forceMultiplierLabel;
-    QLabel* forceRangeLabel;
-    QLabel* forceBiasLabel;
-    QLabel* ratioLabel;
-    QLabel* lfoALabel;
-    QLabel* lfoSLabel;
-    QLabel* forceOffsetLabel;
-    QLabel* pointSizeLabel;
+    // Value edits
+    QLineEdit* radiusEdit;
+    QLineEdit* deltaTEdit;
+    QLineEdit* frictionEdit;
+    QLineEdit* repulsionEdit;
+    QLineEdit* attractionEdit;
+    QLineEdit* kEdit;
+    QLineEdit* balanceEdit;
+    QLineEdit* forceMultiplierEdit;
+    QLineEdit* forceRangeEdit;
+    QLineEdit* forceBiasEdit;
+    QLineEdit* ratioEdit;
+    QLineEdit* lfoAEdit;
+    QLineEdit* lfoSEdit;
+    QLineEdit* forceOffsetEdit;
+    QLineEdit* pointSizeEdit;
     
     QLabel* fpsLabel;
-    QLabel* incrementLabel;
-    
-    // Increment control
-    double currentIncrement = 0.01;
-    const double incrementSteps[6] = {0.001, 0.01, 0.1, 1.0, 10.0, 100.0};
-    int currentIncrementIndex = 1;
+    QTableWidget* particleTypeTable;
 };
 
 #endif // MAINWINDOW_H
