@@ -295,3 +295,16 @@ void ParticleSimulation::moveUniverse(float dx, float dy) {
     );
     CUDA_CHECK(cudaDeviceSynchronize());
 }
+
+void ParticleSimulation::rotateRadioByType() {
+    // Rotate the radioByType values (shift each value to the next type)
+    float temp = h_radioByType[numParticleTypes - 1];
+    for (int i = numParticleTypes - 1; i > 0; i--) {
+        h_radioByType[i] = h_radioByType[i - 1];
+    }
+    h_radioByType[0] = temp;
+    
+    // Upload to device
+    CUDA_CHECK(cudaMemcpy(d_radioByType, h_radioByType.get(), 
+        numParticleTypes * sizeof(float), cudaMemcpyHostToDevice));
+}

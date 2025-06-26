@@ -26,6 +26,7 @@ public:
     void setNumParticleTypes(int types);
     void regenerateForces();
     void resetSimulation();
+    void rotateRadioByType();
     
     // Parameter setters
     void setRadius(float value);

@@ -312,6 +312,9 @@ void CellFlowWidget::keyPressEvent(QKeyEvent* event) {
         case Qt::Key_Space:
             regenerateForces();
             break;
+        case Qt::Key_X:
+            rotateRadioByType();
+            break;
         case Qt::Key_1:
         case Qt::Key_2:
         case Qt::Key_3:
@@ -375,6 +378,10 @@ void CellFlowWidget::regenerateForces() {
 
 void CellFlowWidget::resetSimulation() {
     simulation->initializeParticles();
+}
+
+void CellFlowWidget::rotateRadioByType() {
+    simulation->rotateRadioByType();
 }
 
 bool CellFlowWidget::loadPreset(const QString& filename) {
