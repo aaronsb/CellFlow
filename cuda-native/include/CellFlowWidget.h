@@ -29,6 +29,11 @@ public:
     void resetSimulation();
     void rotateRadioByType();
     
+    // Color control
+    void deharmonizeColors();
+    void harmonizeColors();
+    void setParticleTypeColor(int typeIndex, const QColor& color);
+    
     // Parameter setters
     void setRadius(float value);
     void setDeltaT(float value);
