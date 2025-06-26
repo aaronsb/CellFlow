@@ -513,6 +513,50 @@ bool CellFlowWidget::loadPreset(const QString& filename) {
     if (obj.contains("lfoA")) params.lfoA = obj["lfoA"].toDouble();
     if (obj.contains("lfoS")) params.lfoS = obj["lfoS"].toDouble();
     if (obj.contains("forceOffset")) params.forceOffset = obj["forceOffset"].toDouble();
+    if (obj.contains("pointSize")) params.pointSize = obj["pointSize"].toDouble();
+    
+    // Load particle colors
+    if (obj.contains("particleColors")) {
+        QJsonArray colorsArray = obj["particleColors"].toArray();
+        for (int i = 0; i < colorsArray.size() && i < particleColors.size(); i++) {
+            QJsonObject colorObj = colorsArray[i].toObject();
+            particleColors[i].r = colorObj["r"].toDouble();
+            particleColors[i].g = colorObj["g"].toDouble();
+            particleColors[i].b = colorObj["b"].toDouble();
+        }
+        // Update shader with new colors
+        if (shaderProgram) {
+            makeCurrent();
+            for (int i = 0; i < particleColors.size() && i < params.numParticleTypes; i++) {
+                QString colorName = QString("particleColors[%1]").arg(i);
+                shaderProgram->setUniformValue(colorName.toStdString().c_str(), 
+                    particleColors[i].r, particleColors[i].g, particleColors[i].b);
+            }
+            doneCurrent();
+        }
+    }
+    
+    // Load radioByType values
+    if (obj.contains("radioByType")) {
+        QJsonArray radioArray = obj["radioByType"].toArray();
+        std::vector<float> radioValues;
+        for (const auto& val : radioArray) {
+            radioValues.push_back(val.toDouble());
+        }
+        // Set radio values in simulation
+        for (int i = 0; i < radioValues.size() && i < params.numParticleTypes; i++) {
+            simulation->setRadioByTypeValue(i, radioValues[i]);
+        }
+    }
+    
+    // Load raw force table
+    if (obj.contains("rawForceTable")) {
+        QJsonArray forceArray = obj["rawForceTable"].toArray();
+        float* rawForceTable = simulation->getRawForceTableValues();
+        for (int i = 0; i < forceArray.size() && i < params.numParticleTypes * params.numParticleTypes; i++) {
+            rawForceTable[i] = forceArray[i].toDouble();
+        }
+    }
     
     // Update force table
     simulation->updateForceTable(params.forceRange, params.forceBias, params.forceOffset);
@@ -539,6 +583,34 @@ bool CellFlowWidget::savePreset(const QString& filename) {
     obj["lfoA"] = params.lfoA;
     obj["lfoS"] = params.lfoS;
     obj["forceOffset"] = params.forceOffset;
+    obj["pointSize"] = params.pointSize;
+    
+    // Save particle colors
+    QJsonArray colorsArray;
+    for (int i = 0; i < params.numParticleTypes && i < particleColors.size(); i++) {
+        QJsonObject colorObj;
+        colorObj["r"] = particleColors[i].r;
+        colorObj["g"] = particleColors[i].g;
+        colorObj["b"] = particleColors[i].b;
+        colorsArray.append(colorObj);
+    }
+    obj["particleColors"] = colorsArray;
+    
+    // Save radioByType values
+    QJsonArray radioArray;
+    std::vector<float> radioValues = simulation->getRadioByType();
+    for (int i = 0; i < params.numParticleTypes && i < radioValues.size(); i++) {
+        radioArray.append(radioValues[i]);
+    }
+    obj["radioByType"] = radioArray;
+    
+    // Save raw force table
+    QJsonArray forceArray;
+    float* rawForceTable = simulation->getRawForceTableValues();
+    for (int i = 0; i < params.numParticleTypes * params.numParticleTypes; i++) {
+        forceArray.append(rawForceTable[i]);
+    }
+    obj["rawForceTable"] = forceArray;
     
     QJsonDocument doc(obj);
     

@@ -459,7 +459,13 @@ void MainWindow::onLoadClicked() {
             kSlider->setValue(static_cast<int>((params.k - 1.5) / 0.01));
             balanceSlider->setValue(static_cast<int>((params.balance - 0.01) / 0.01));
             forceMultiplierSlider->setValue(static_cast<int>(params.forceMultiplier / 0.01));
-            // Add other sliders as needed
+            forceRangeSlider->setValue(static_cast<int>((params.forceRange + 1.0) / 0.01));
+            forceBiasSlider->setValue(static_cast<int>((params.forceBias + 1.0) / 0.01));
+            ratioSlider->setValue(static_cast<int>((params.ratio + 2.0) / 0.01));
+            lfoASlider->setValue(static_cast<int>((params.lfoA + 1.0) / 0.01));
+            lfoSSlider->setValue(static_cast<int>((params.lfoS - 0.1) / 0.01));
+            forceOffsetSlider->setValue(static_cast<int>((params.forceOffset + 1.0) / 0.01));
+            pointSizeSlider->setValue(static_cast<int>((params.pointSize - 1.0) / 0.5));
             updateParticleTypeTable();
         } else {
             QMessageBox::warning(this, "Error", "Failed to load preset!");
