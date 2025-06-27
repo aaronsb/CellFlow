@@ -12,6 +12,7 @@
 #include <QGroupBox>
 #include <QTableWidget>
 #include <QComboBox>
+#include <QCheckBox>
 #include <memory>
 
 // Custom widget for color manipulation
@@ -66,6 +67,7 @@ private slots:
     void onForceOffsetChanged(int value);
     void onPointSizeChanged(int value);
     void onEffectChanged(int index);
+    void onTooltipToggled(bool checked);
     
     void onRegenerateClicked();
     void onResetClicked();
@@ -84,6 +86,7 @@ private slots:
     
 private:
     void setupUI();
+    void setTooltipsEnabled(bool enabled);
     QWidget* createControlGroup(const QString& label, QSlider*& slider, 
                                QLineEdit*& valueEdit, double min, double max, 
                                double value, double step = 0.01);
@@ -133,6 +136,9 @@ private:
     
     QLabel* fpsLabel;
     QTableWidget* particleTypeTable;
+    
+    // Tooltip control
+    QCheckBox* tooltipCheckBox;
 };
 
 #endif // MAINWINDOW_H

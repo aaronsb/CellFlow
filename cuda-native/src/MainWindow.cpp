@@ -102,6 +102,12 @@ void MainWindow::setupUI() {
     fpsLabel->setStyleSheet("QLabel { font-weight: bold; }");
     controlLayout->addWidget(fpsLabel);
     
+    // Tooltip control
+    tooltipCheckBox = new QCheckBox("Show Tooltips", this);
+    tooltipCheckBox->setChecked(false);
+    connect(tooltipCheckBox, &QCheckBox::toggled, this, &MainWindow::onTooltipToggled);
+    controlLayout->addWidget(tooltipCheckBox);
+    
     // Particle controls group
     QGroupBox* particleGroup = new QGroupBox("Particles", this);
     QGridLayout* particleLayout = new QGridLayout(particleGroup);
@@ -192,6 +198,10 @@ void MainWindow::setupUI() {
     QPushButton* resetButton = new QPushButton("RESET", this);
     QPushButton* rexButton = new QPushButton("reX", this);
     
+    regenButton->setObjectName("regenButton");
+    resetButton->setObjectName("resetButton");
+    rexButton->setObjectName("rexButton");
+    
     connect(regenButton, &QPushButton::clicked, this, &MainWindow::onRegenerateClicked);
     connect(resetButton, &QPushButton::clicked, this, &MainWindow::onResetClicked);
     connect(rexButton, &QPushButton::clicked, this, &MainWindow::onReXClicked);
@@ -203,6 +213,9 @@ void MainWindow::setupUI() {
     // Save/Load buttons
     QPushButton* saveButton = new QPushButton("Save", this);
     QPushButton* loadButton = new QPushButton("Load", this);
+    
+    saveButton->setObjectName("saveButton");
+    loadButton->setObjectName("loadButton");
     
     connect(saveButton, &QPushButton::clicked, this, &MainWindow::onSaveClicked);
     connect(loadButton, &QPushButton::clicked, this, &MainWindow::onLoadClicked);
@@ -218,6 +231,9 @@ void MainWindow::setupUI() {
     
     QPushButton* deharmonizeButton = new QPushButton("De-harmonize", this);
     QPushButton* harmonizeButton = new QPushButton("Harmonize", this);
+    
+    deharmonizeButton->setObjectName("deharmonizeButton");
+    harmonizeButton->setObjectName("harmonizeButton");
     
     connect(deharmonizeButton, &QPushButton::clicked, this, &MainWindow::onDeharmonizeClicked);
     connect(harmonizeButton, &QPushButton::clicked, this, &MainWindow::onHarmonizeClicked);
@@ -432,6 +448,10 @@ void MainWindow::onEffectChanged(int index) {
     cellFlowWidget->setEffectType(index);
 }
 
+void MainWindow::onTooltipToggled(bool checked) {
+    setTooltipsEnabled(checked);
+}
+
 
 void MainWindow::onRegenerateClicked() {
     cellFlowWidget->regenerateForces();
@@ -598,6 +618,142 @@ void MainWindow::onParticleColorChanged(int typeIndex, const QColor& newColor) {
     QTableWidgetItem* typeItem = particleTypeTable->item(typeIndex, 0);
     if (typeItem) {
         typeItem->setForeground(QBrush(newColor));
+    }
+}
+
+void MainWindow::setTooltipsEnabled(bool enabled) {
+    // Particle controls
+    if (particleCountEdit) {
+        particleCountEdit->setToolTip(enabled ? 
+            "Total number of particles (500-10000)\nHigher counts create denser patterns but require more GPU resources" : "");
+    }
+    if (particleTypesSpinBox) {
+        particleTypesSpinBox->setToolTip(enabled ? 
+            "Number of distinct particle types (2-6)\nEach type has unique colors and force relationships" : "");
+    }
+    
+    // Physics sliders
+    if (radiusSlider) {
+        radiusSlider->setToolTip(enabled ? 
+            "Interaction radius (10-100)\nParticles only affect each other within this distance" : "");
+        radiusEdit->setToolTip(radiusSlider->toolTip());
+    }
+    if (deltaTSlider) {
+        deltaTSlider->setToolTip(enabled ? 
+            "Time step (0.01-0.5)\nSmaller = more accurate but slower, Larger = faster but may be unstable" : "");
+        deltaTEdit->setToolTip(deltaTSlider->toolTip());
+    }
+    if (frictionSlider) {
+        frictionSlider->setToolTip(enabled ? 
+            "Velocity damping (0.01-0.99)\nHigher = more viscous movement, Lower = particles maintain momentum" : "");
+        frictionEdit->setToolTip(frictionSlider->toolTip());
+    }
+    if (repulsionSlider) {
+        repulsionSlider->setToolTip(enabled ? 
+            "Base repulsion force (0.1-100)\nPrevents overlap and creates personal space" : "");
+        repulsionEdit->setToolTip(repulsionSlider->toolTip());
+    }
+    if (attractionSlider) {
+        attractionSlider->setToolTip(enabled ? 
+            "Attraction force modifier (0.01-1.0)\nScales attraction values in force matrix" : "");
+        attractionEdit->setToolTip(attractionSlider->toolTip());
+    }
+    if (kSlider) {
+        kSlider->setToolTip(enabled ? 
+            "Force scaling constant (0.1-50)\nMaster force multiplier for system energy" : "");
+        kEdit->setToolTip(kSlider->toolTip());
+    }
+    
+    // Advanced sliders
+    if (forceRangeSlider) {
+        forceRangeSlider->setToolTip(enabled ? 
+            "Force falloff range (0.01-1.0)\nControls how quickly forces decrease with distance" : "");
+        forceRangeEdit->setToolTip(forceRangeSlider->toolTip());
+    }
+    if (forceBiasSlider) {
+        forceBiasSlider->setToolTip(enabled ? 
+            "Force curve bias (-1.0 to 1.0)\nNegative = repulsion at medium range, Positive = attraction" : "");
+        forceBiasEdit->setToolTip(forceBiasSlider->toolTip());
+    }
+    if (ratioSlider) {
+        ratioSlider->setToolTip(enabled ? 
+            "Force ratio adjustment (-2.0 to 2.0)\nModifies attraction/repulsion balance" : "");
+        ratioEdit->setToolTip(ratioSlider->toolTip());
+    }
+    if (lfoASlider) {
+        lfoASlider->setToolTip(enabled ? 
+            "LFO Amplitude (-1.0 to 1.0)\nCreates pulsing force variations, 0 = disabled" : "");
+        lfoAEdit->setToolTip(lfoASlider->toolTip());
+    }
+    if (lfoSSlider) {
+        lfoSSlider->setToolTip(enabled ? 
+            "LFO Speed in Hz (0.1-10.0)\nHow fast forces pulse when LFO is active" : "");
+        lfoSEdit->setToolTip(lfoSSlider->toolTip());
+    }
+    if (forceOffsetSlider) {
+        forceOffsetSlider->setToolTip(enabled ? 
+            "Global force offset (-1.0 to 1.0)\nAdds constant to all forces" : "");
+        forceOffsetEdit->setToolTip(forceOffsetSlider->toolTip());
+    }
+    
+    // Rendering controls
+    if (pointSizeSlider) {
+        pointSizeSlider->setToolTip(enabled ? 
+            "Particle sprite size (1-10 pixels)\nLarger sizes create more coverage" : "");
+        pointSizeEdit->setToolTip(pointSizeSlider->toolTip());
+    }
+    if (effectComboBox) {
+        effectComboBox->setToolTip(enabled ? 
+            "Post-processing effect\nBlur = soft edges, Glow = bright halos" : "");
+    }
+    
+    // Adaptive parameters
+    if (forceMultiplierSlider) {
+        forceMultiplierSlider->setToolTip(enabled ? 
+            "Adaptive force multiplier (0.0-5.0)\nAdjusts forces based on neighbor count" : "");
+        forceMultiplierEdit->setToolTip(forceMultiplierSlider->toolTip());
+    }
+    if (balanceSlider) {
+        balanceSlider->setToolTip(enabled ? 
+            "Density adaptation balance (0.01-1.5)\nHow much neighbor density affects forces" : "");
+        balanceEdit->setToolTip(balanceSlider->toolTip());
+    }
+    
+    // Buttons
+    QPushButton* regenBtn = findChild<QPushButton*>("regenButton");
+    if (regenBtn) {
+        regenBtn->setToolTip(enabled ? 
+            "Regenerate force matrix\nCreates new random particle behavior patterns" : "");
+    }
+    QPushButton* resetBtn = findChild<QPushButton*>("resetButton");
+    if (resetBtn) {
+        resetBtn->setToolTip(enabled ? 
+            "Reset particle positions\nRandomly redistributes particles in current window" : "");
+    }
+    QPushButton* rexBtn = findChild<QPushButton*>("rexButton");
+    if (rexBtn) {
+        rexBtn->setToolTip(enabled ? 
+            "Rotate radius modifiers\nChanges interaction ranges between types" : "");
+    }
+    QPushButton* saveBtn = findChild<QPushButton*>("saveButton");
+    if (saveBtn) {
+        saveBtn->setToolTip(enabled ? 
+            "Save current settings\nStores all parameters and force matrix" : "");
+    }
+    QPushButton* loadBtn = findChild<QPushButton*>("loadButton");
+    if (loadBtn) {
+        loadBtn->setToolTip(enabled ? 
+            "Load saved preset\nRestores parameters and force relationships" : "");
+    }
+    QPushButton* deharmonizeBtn = findChild<QPushButton*>("deharmonizeButton");
+    if (deharmonizeBtn) {
+        deharmonizeBtn->setToolTip(enabled ? 
+            "Shift colors randomly\nCreates more color variety over time" : "");
+    }
+    QPushButton* harmonizeBtn = findChild<QPushButton*>("harmonizeButton");
+    if (harmonizeBtn) {
+        harmonizeBtn->setToolTip(enabled ? 
+            "Reset to default colors\nRestores harmonious palette based on golden angle" : "");
     }
 }
 
