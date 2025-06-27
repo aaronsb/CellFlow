@@ -36,7 +36,6 @@ struct SimulationParams {
     
     // Rendering parameters
     float pointSize = 4.0f;
-    float metaball = 0.0f;  // 0 = disabled, > 0 = metaball effect
 };
 
 // Color definitions (RGB values 0-1)

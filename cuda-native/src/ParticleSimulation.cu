@@ -160,7 +160,18 @@ __global__ void moveParticlesKernel(
 
 // ParticleSimulation implementation
 ParticleSimulation::ParticleSimulation(int particleCount) 
-    : particleCount(particleCount), numParticleTypes(6), useBufferAasInput(true) {
+    : particleCount(particleCount), numParticleTypes(6), useBufferAasInput(true),
+      currentCanvasWidth(1920.0f), currentCanvasHeight(1080.0f) {
+    allocateMemory();
+    initializeCurand();
+    initializeParticles();
+    initializeForceTable();
+    initializeRadioByType();
+}
+
+ParticleSimulation::ParticleSimulation(int particleCount, float canvasWidth, float canvasHeight) 
+    : particleCount(particleCount), numParticleTypes(6), useBufferAasInput(true),
+      currentCanvasWidth(canvasWidth), currentCanvasHeight(canvasHeight) {
     allocateMemory();
     initializeCurand();
     initializeParticles();
@@ -206,13 +217,28 @@ void ParticleSimulation::initializeCurand() {
 }
 
 void ParticleSimulation::initializeParticles() {
-    SimulationParams params;
     int blocks = (particleCount + BLOCK_SIZE - 1) / BLOCK_SIZE;
     initializeParticlesKernel<<<blocks, BLOCK_SIZE>>>(
         d_particles, particleCount, numParticleTypes, 
-        params.canvasWidth, params.canvasHeight, d_randStates
+        currentCanvasWidth, currentCanvasHeight, d_randStates
     );
     CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+void ParticleSimulation::initializeParticles(float canvasWidth, float canvasHeight) {
+    currentCanvasWidth = canvasWidth;
+    currentCanvasHeight = canvasHeight;
+    int blocks = (particleCount + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    initializeParticlesKernel<<<blocks, BLOCK_SIZE>>>(
+        d_particles, particleCount, numParticleTypes, 
+        canvasWidth, canvasHeight, d_randStates
+    );
+    CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+void ParticleSimulation::updateCanvasDimensions(float canvasWidth, float canvasHeight) {
+    currentCanvasWidth = canvasWidth;
+    currentCanvasHeight = canvasHeight;
 }
 
 void ParticleSimulation::initializeForceTable() {

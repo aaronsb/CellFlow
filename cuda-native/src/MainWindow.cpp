@@ -156,7 +156,21 @@ void MainWindow::setupUI() {
     QVBoxLayout* renderLayout = new QVBoxLayout(renderGroup);
     
     renderLayout->addWidget(createControlGroup("Point Size", pointSizeSlider, pointSizeEdit, 1.0, 10.0, 4.0, 0.5));
-    renderLayout->addWidget(createControlGroup("Metaball", metaballSlider, metaballEdit, 0.0, 1.0, 0.0));
+    
+    // Add effect selector
+    QHBoxLayout* effectLayout = new QHBoxLayout();
+    QLabel* effectLabel = new QLabel("Effect:", this);
+    effectComboBox = new QComboBox(this);
+    effectComboBox->addItem("None");
+    effectComboBox->addItem("Blur");
+    effectComboBox->addItem("Glow");
+    effectComboBox->setCurrentIndex(0);
+    connect(effectComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), 
+            this, &MainWindow::onEffectChanged);
+    effectLayout->addWidget(effectLabel);
+    effectLayout->addWidget(effectComboBox);
+    effectLayout->addStretch();
+    renderLayout->addLayout(effectLayout);
     
     controlLayout->addWidget(renderGroup);
     
@@ -300,7 +314,6 @@ QWidget* MainWindow::createControlGroup(const QString& label, QSlider*& slider,
     else if (label == "LFOS") connect(slider, &QSlider::valueChanged, this, &MainWindow::onLfoSChanged);
     else if (label == "F_Offset") connect(slider, &QSlider::valueChanged, this, &MainWindow::onForceOffsetChanged);
     else if (label == "Point Size") connect(slider, &QSlider::valueChanged, this, &MainWindow::onPointSizeChanged);
-    else if (label == "Metaball") connect(slider, &QSlider::valueChanged, this, &MainWindow::onMetaballChanged);
     
     return widget;
 }
@@ -415,10 +428,10 @@ void MainWindow::onPointSizeChanged(int value) {
     cellFlowWidget->setPointSize(v);
 }
 
-void MainWindow::onMetaballChanged(int value) {
-    double v = value * 0.01;  // 0 to 1 range
-    cellFlowWidget->setMetaball(v);
+void MainWindow::onEffectChanged(int index) {
+    cellFlowWidget->setEffectType(index);
 }
+
 
 void MainWindow::onRegenerateClicked() {
     cellFlowWidget->regenerateForces();
@@ -473,7 +486,6 @@ void MainWindow::onLoadClicked() {
             lfoSSlider->setValue(static_cast<int>((params.lfoS - 0.1) / 0.01));
             forceOffsetSlider->setValue(static_cast<int>((params.forceOffset + 1.0) / 0.01));
             pointSizeSlider->setValue(static_cast<int>((params.pointSize - 1.0) / 0.5));
-            metaballSlider->setValue(static_cast<int>(params.metaball / 0.01));
             updateParticleTypeTable();
         } else {
             QMessageBox::warning(this, "Error", "Failed to load preset!");

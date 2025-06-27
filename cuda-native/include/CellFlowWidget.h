@@ -51,7 +51,7 @@ public:
     void setLfoS(float value);
     void setForceOffset(float value);
     void setPointSize(float value);
-    void setMetaball(float value);
+    void setEffectType(int type);
     
     // Get current parameters
     const SimulationParams& getParams() const { return params; }
@@ -80,25 +80,24 @@ private slots:
 
 private:
     void initializeShaders();
-    void initializeMetaballShaders();
+    void initializeEffectShaders();
     void initializeQuadBuffer();
     void updateParticleBuffer();
     void generateParticleColors();
-    void renderMetaballs();
-    void cleanupMetaballResources();
+    void renderWithEffects();
+    void cleanupEffectResources();
     
     std::unique_ptr<ParticleSimulation> simulation;
     SimulationParams params;
     
     // OpenGL resources
     QOpenGLShaderProgram* shaderProgram;
-    QOpenGLShaderProgram* metaballAccumProgram;
-    QOpenGLShaderProgram* metaballCompositeProgram;
+    QOpenGLShaderProgram* effectProgram;
     QOpenGLBuffer particleBuffer;
     QOpenGLVertexArrayObject vao;
     
-    // Metaball rendering resources
-    std::vector<QOpenGLFramebufferObject*> metaballFBOs; // One per particle type
+    // Effect rendering resources
+    QOpenGLFramebufferObject* effectFBO;
     QOpenGLVertexArrayObject quadVAO;
     QOpenGLBuffer quadVBO;
     GLuint particleTexture;
@@ -117,6 +116,9 @@ private:
     // Window dimensions
     int windowWidth;
     int windowHeight;
+    
+    // Effect settings
+    int currentEffectType;
 };
 
 #endif // CELLFLOW_WIDGET_H

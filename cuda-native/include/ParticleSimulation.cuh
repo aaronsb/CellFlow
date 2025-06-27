@@ -10,10 +10,15 @@
 class ParticleSimulation {
 public:
     ParticleSimulation(int particleCount);
+    ParticleSimulation(int particleCount, float canvasWidth, float canvasHeight);
     ~ParticleSimulation();
     
     // Initialize particles with random positions and types
     void initializeParticles();
+    void initializeParticles(float canvasWidth, float canvasHeight);
+    
+    // Update canvas dimensions without reinitializing
+    void updateCanvasDimensions(float canvasWidth, float canvasHeight);
     
     // Initialize force table with random values
     void initializeForceTable();
@@ -54,6 +59,8 @@ public:
 private:
     int particleCount;
     int numParticleTypes;
+    float currentCanvasWidth;
+    float currentCanvasHeight;
     
     // Device memory
     Particle* d_particles;
