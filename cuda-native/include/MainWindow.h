@@ -79,7 +79,12 @@ private slots:
     // DOF slots
     void onFocusDistanceChanged(int value);
     void onApertureSizeChanged(int value);
-    
+
+    // Gaussian splatting slots
+    void onGaussianSizeChanged(int value);
+    void onGaussianOpacityChanged(int value);
+    void onGaussianDensityChanged(int value);
+
     void onRegenerateClicked();
     void onResetClicked();
     void onReXClicked();
@@ -136,6 +141,11 @@ private:
     QSlider* focusDistanceSlider;
     QSlider* apertureSizeSlider;
 
+    // Gaussian splatting sliders
+    QSlider* gaussianSizeSlider;
+    QSlider* gaussianOpacitySlider;
+    QSlider* gaussianDensitySlider;
+
     // Effect selector
     QComboBox* effectComboBox;
     
@@ -165,6 +175,11 @@ private:
     // DOF edits
     QLineEdit* focusDistanceEdit;
     QLineEdit* apertureSizeEdit;
+
+    // Gaussian splatting edits
+    QLineEdit* gaussianSizeEdit;
+    QLineEdit* gaussianOpacityEdit;
+    QLineEdit* gaussianDensityEdit;
 
     // Effect enable checkboxes
     QCheckBox* enableDepthFadeCheckbox;

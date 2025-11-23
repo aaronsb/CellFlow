@@ -49,6 +49,11 @@ struct SimulationParams {
     float focusDistance = 3000.0f;  // Distance to focal plane
     float apertureSize = 0.0f;       // 0 = everything in focus, higher = more blur
 
+    // Gaussian splatting parameters
+    float gaussianSizeScale = 2.0f;      // Size multiplier for Gaussian splats
+    float gaussianOpacityScale = 1.0f;   // Opacity multiplier
+    float gaussianDensityInfluence = 0.5f; // How much density affects size (0-1)
+
     // Effect enable/disable flags
     bool enableDepthFade = false;
     bool enableSizeAttenuation = true;

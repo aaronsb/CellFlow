@@ -298,15 +298,19 @@ void CellFlowWidget::initializeGaussianShaders() {
         #version 150 core
         in vec3 position;
         in float particleType;
+        in float density;  // Local particle density (0-1)
 
         uniform mat4 viewMatrix;
         uniform mat4 projMatrix;
         uniform vec3 particleColors[10];
         uniform float pointSize;
         uniform vec3 canvasSize;
+        uniform float gaussianSizeScale;
+        uniform float gaussianDensityInfluence;
 
         out vec3 fragColor;
         out float depth;
+        out float particleDensity;
 
         void main() {
             // Center the particle space around origin
@@ -319,11 +323,16 @@ void CellFlowWidget::initializeGaussianShaders() {
             // Calculate depth for sorting and size attenuation
             depth = length(viewPos.xyz);
 
+            // Adaptive size based on density: denser clusters = larger splats
+            // densityScale ranges from 1.0 (no neighbors) to 1.0 + densityInfluence (max density)
+            float densityScale = 1.0 + (density * gaussianDensityInfluence);
+
             // Size attenuation for Gaussian splats (larger for distant particles to maintain visual size)
             float distanceScale = 2000.0 / depth;
-            gl_PointSize = pointSize * distanceScale * 2.0; // 2x larger for Gaussian falloff
+            gl_PointSize = pointSize * distanceScale * gaussianSizeScale * densityScale;
 
             fragColor = particleColors[int(particleType)];
+            particleDensity = density;
         }
     )";
 
@@ -332,7 +341,10 @@ void CellFlowWidget::initializeGaussianShaders() {
         #version 150 core
         in vec3 fragColor;
         in float depth;
+        in float particleDensity;
         out vec4 outColor;
+
+        uniform float gaussianOpacityScale;
 
         void main() {
             // Convert point coord to [-1, 1] range centered at splat center
@@ -351,9 +363,10 @@ void CellFlowWidget::initializeGaussianShaders() {
                 discard;
             }
 
-            // Alpha blending with Gaussian falloff
-            // Higher opacity for Phase 1 to make surfaces visible
-            float alpha = gaussian * 0.6;
+            // Adaptive opacity based on density: denser clusters = more opaque
+            // Base opacity boosted by density for better surface visibility
+            float densityOpacity = 0.4 + (particleDensity * 0.4); // Range: 0.4-0.8
+            float alpha = gaussian * densityOpacity * gaussianOpacityScale;
 
             outColor = vec4(fragColor, alpha);
         }
@@ -373,9 +386,10 @@ void CellFlowWidget::initializeGaussianShaders() {
         std::cout << "Gaussian splatting shader linked successfully!" << std::endl;
     }
 
-    // Bind attribute locations (same as regular shader)
+    // Bind attribute locations
     gaussianProgram->bindAttributeLocation("position", 0);
     gaussianProgram->bindAttributeLocation("particleType", 1);
+    gaussianProgram->bindAttributeLocation("density", 2);
 }
 
 void CellFlowWidget::initializeQuadBuffer() {
@@ -492,12 +506,24 @@ void CellFlowWidget::paintGL() {
     activeProgram->bind();
     vao.bind();
 
-    // Bind the particle buffer and set up vertex attributes (3D position + type)
+    // Bind the particle buffer and set up vertex attributes
     particleBuffer.bind();
-    activeProgram->enableAttributeArray(0);
-    activeProgram->setAttributeBuffer(0, GL_FLOAT, 0, 3, 4 * sizeof(float));  // 3D position
-    activeProgram->enableAttributeArray(1);
-    activeProgram->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 1, 4 * sizeof(float));  // particle type
+
+    if (gaussianSplattingEnabled) {
+        // Gaussian mode: position (3) + type (1) + density (1) = 5 floats per vertex
+        activeProgram->enableAttributeArray(0);
+        activeProgram->setAttributeBuffer(0, GL_FLOAT, 0, 3, 5 * sizeof(float));  // 3D position
+        activeProgram->enableAttributeArray(1);
+        activeProgram->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 1, 5 * sizeof(float));  // particle type
+        activeProgram->enableAttributeArray(2);
+        activeProgram->setAttributeBuffer(2, GL_FLOAT, 4 * sizeof(float), 1, 5 * sizeof(float));  // density
+    } else {
+        // Regular mode: position (3) + type (1) = 4 floats per vertex
+        activeProgram->enableAttributeArray(0);
+        activeProgram->setAttributeBuffer(0, GL_FLOAT, 0, 3, 4 * sizeof(float));  // 3D position
+        activeProgram->enableAttributeArray(1);
+        activeProgram->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 1, 4 * sizeof(float));  // particle type
+    }
 
     // Calculate camera position from orbital parameters
     float radX = cameraRotationX * M_PI / 180.0f;
@@ -535,8 +561,14 @@ void CellFlowWidget::paintGL() {
     activeProgram->setUniformValue("canvasSize", QVector3D(params.canvasWidth, params.canvasHeight, params.canvasDepth));
     activeProgram->setUniformValue("pointSize", params.pointSize);
 
-    // Set additional uniforms only for regular shader (Gaussian shader doesn't use these)
-    if (!gaussianSplattingEnabled) {
+    // Set shader-specific uniforms
+    if (gaussianSplattingEnabled) {
+        // Gaussian-specific parameters
+        activeProgram->setUniformValue("gaussianSizeScale", params.gaussianSizeScale);
+        activeProgram->setUniformValue("gaussianOpacityScale", params.gaussianOpacityScale);
+        activeProgram->setUniformValue("gaussianDensityInfluence", params.gaussianDensityInfluence);
+    } else {
+        // Regular shader parameters
         activeProgram->setUniformValue("sizeAttenuationFactor", params.sizeAttenuationFactor);
         activeProgram->setUniformValue("depthFadeStart", params.depthFadeStart);
         activeProgram->setUniformValue("depthFadeEnd", params.depthFadeEnd);
@@ -622,18 +654,61 @@ void CellFlowWidget::updateParticleBuffer() {
     // Just update the buffer data - no attribute setup here
     particleBuffer.bind();
 
-    // Prepare data for GPU (3D position + type)
-    std::vector<float> vertexData;
-    vertexData.reserve(particleData.size() * 4); // x, y, z, type
+    if (gaussianSplattingEnabled) {
+        // For Gaussian splatting: compute local density and include in vertex data
+        // Format: x, y, z, type, density
+        std::vector<float> vertexData;
+        vertexData.reserve(particleData.size() * 5);
 
-    for (const auto& p : particleData) {
-        vertexData.push_back(p.pos.x);
-        vertexData.push_back(p.pos.y);
-        vertexData.push_back(p.pos.z);
-        vertexData.push_back(static_cast<float>(p.ptype));
+        // Compute local density for each particle
+        float searchRadius = params.radius * 2.0f; // Use interaction radius
+        float searchRadiusSq = searchRadius * searchRadius;
+
+        for (size_t i = 0; i < particleData.size(); ++i) {
+            const auto& p = particleData[i];
+
+            // Count neighbors within search radius
+            int neighborCount = 0;
+            for (size_t j = 0; j < particleData.size(); ++j) {
+                if (i == j) continue;
+
+                const auto& other = particleData[j];
+                float dx = p.pos.x - other.pos.x;
+                float dy = p.pos.y - other.pos.y;
+                float dz = p.pos.z - other.pos.z;
+                float distSq = dx*dx + dy*dy + dz*dz;
+
+                if (distSq < searchRadiusSq) {
+                    neighborCount++;
+                }
+            }
+
+            // Normalize density (0-1 range, assuming max ~50 neighbors for typical clustering)
+            float density = std::min(neighborCount / 50.0f, 1.0f);
+
+            vertexData.push_back(p.pos.x);
+            vertexData.push_back(p.pos.y);
+            vertexData.push_back(p.pos.z);
+            vertexData.push_back(static_cast<float>(p.ptype));
+            vertexData.push_back(density);
+        }
+
+        particleBuffer.allocate(vertexData.data(), vertexData.size() * sizeof(float));
+    } else {
+        // For regular rendering: just position + type
+        std::vector<float> vertexData;
+        vertexData.reserve(particleData.size() * 4); // x, y, z, type
+
+        for (const auto& p : particleData) {
+            vertexData.push_back(p.pos.x);
+            vertexData.push_back(p.pos.y);
+            vertexData.push_back(p.pos.z);
+            vertexData.push_back(static_cast<float>(p.ptype));
+        }
+
+        particleBuffer.allocate(vertexData.data(), vertexData.size() * sizeof(float));
     }
 
-    particleBuffer.allocate(vertexData.data(), vertexData.size() * sizeof(float));
     particleBuffer.release();
 }
 
@@ -887,6 +962,18 @@ void CellFlowWidget::setFrameRateCap(int capFps) {
 void CellFlowWidget::setGaussianSplatting(bool enabled) {
     gaussianSplattingEnabled = enabled;
     update();  // Force redraw with new rendering mode
+}
+
+void CellFlowWidget::setGaussianSizeScale(float value) {
+    params.gaussianSizeScale = value;
+}
+
+void CellFlowWidget::setGaussianOpacityScale(float value) {
+    params.gaussianOpacityScale = value;
+}
+
+void CellFlowWidget::setGaussianDensityInfluence(float value) {
+    params.gaussianDensityInfluence = value;
 }
 
 

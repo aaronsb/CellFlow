@@ -80,6 +80,9 @@ public:
 
     // Gaussian splatting control
     void setGaussianSplatting(bool enabled);
+    void setGaussianSizeScale(float value);
+    void setGaussianOpacityScale(float value);
+    void setGaussianDensityInfluence(float value);
 
     // Get current parameters
     const SimulationParams& getParams() const { return params; }
