@@ -9,30 +9,30 @@
 #include <GL/gl.h>
 
 CellFlowWidget::CellFlowWidget(QWidget* parent)
-    : QOpenGLWidget(parent), 
+    : QOpenGLWidget(parent),
       simulation(std::make_unique<ParticleSimulation>(4000)),
       frameCount(0), currentFPS(0.0), lastFPSUpdate(0),
       shaderProgram(nullptr), effectProgram(nullptr),
-      particleTexture(0), effectFBO(nullptr), currentEffectType(0) {
+      particleTexture(0), effectFBO(nullptr), currentEffectType(0),
+      cameraDistance(3000.0f), cameraRotationX(30.0f), cameraRotationY(45.0f),
+      cameraPosX(0.0f), cameraPosY(0.0f), cameraPosZ(0.0f),
+      cameraTargetX(0.0f), cameraTargetY(0.0f), cameraTargetZ(0.0f),
+      isLeftMousePressed(false), isRightMousePressed(false),
+      invertPan(true), invertForwardBack(false), invertRotation(false),
+      frameRateCap(0), lastFrameTime(0) {
     
-    // Set up the timer for updates
+    // Note: We don't use a fixed timer anymore - updates are driven by vsync
+    // This allows the simulation to adapt to any refresh rate (60Hz, 120Hz, 144Hz, etc.)
     timer = new QTimer(this);
-    connect(timer, &QTimer::timeout, this, &CellFlowWidget::updateSimulation);
-    timer->start(16); // ~60 FPS
-    
+    timer->setSingleShot(true);  // Not used for regular updates anymore
+
     frameTimer.start();
-    
+
     // Generate initial particle colors
     generateParticleColors();
-    
-    // Set format for Wayland compatibility
-    QSurfaceFormat format;
-    format.setVersion(3, 2);
-    format.setProfile(QSurfaceFormat::CoreProfile);
-    format.setRenderableType(QSurfaceFormat::OpenGL);
-    format.setSamples(0);
-    format.setSwapInterval(1); // Enable VSync
-    setFormat(format);
+
+    // Trigger continuous updates (self-paced with vsync for perfect sync)
+    update();
 }
 
 CellFlowWidget::~CellFlowWidget() {
@@ -63,6 +63,8 @@ void CellFlowWidget::initializeGL() {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_PROGRAM_POINT_SIZE);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
     
     initializeShaders();
     initializeEffectShaders();
@@ -86,45 +88,102 @@ void CellFlowWidget::initializeGL() {
 void CellFlowWidget::initializeShaders() {
     shaderProgram = new QOpenGLShaderProgram(this);
     
-    // Vertex shader
+    // Vertex shader - 3D with perspective projection and depth-based effects
     const char* vertexShaderSource = R"(
         #version 150 core
-        in vec2 position;
+        in vec3 position;
         in float particleType;
-        
-        uniform vec2 canvasSize;
+
+        uniform mat4 viewMatrix;
+        uniform mat4 projMatrix;
         uniform vec3 particleColors[10];
         uniform float pointSize;
-        
+        uniform vec3 canvasSize;
+        uniform float sizeAttenuationFactor;
+        uniform bool enableSizeAttenuation;
+
         out vec3 fragColor;
-        
+        out float depth;
+
         void main() {
-            vec2 normalizedPos = (position / canvasSize) * 2.0 - 1.0;
-            normalizedPos.y = -normalizedPos.y; // Flip Y coordinate
-            
-            gl_Position = vec4(normalizedPos, 0.0, 1.0);
-            gl_PointSize = pointSize;
-            
+            // Center the particle space around origin
+            vec3 centeredPos = position - canvasSize * 0.5;
+
+            // Apply view and projection matrices
+            vec4 viewPos = viewMatrix * vec4(centeredPos, 1.0);
+            gl_Position = projMatrix * viewPos;
+
+            // Calculate depth for size attenuation (distance from camera)
+            depth = length(viewPos.xyz);
+
+            // Size attenuation based on distance (configurable and toggleable)
+            if (enableSizeAttenuation) {
+                float distanceScale = sizeAttenuationFactor / depth;
+                gl_PointSize = pointSize * distanceScale;
+            } else {
+                gl_PointSize = pointSize;
+            }
+
             fragColor = particleColors[int(particleType)];
         }
     )";
     
-    // Fragment shader
+    // Fragment shader - With depth-based atmospheric fade and DOF
     const char* fragmentShaderSource = R"(
         #version 150 core
         in vec3 fragColor;
+        in float depth;
         out vec4 outColor;
-        
+
+        uniform float depthFadeStart;
+        uniform float depthFadeEnd;
+        uniform float brightnessMin;
+        uniform float focusDistance;
+        uniform float apertureSize;
+        uniform bool enableDepthFade;
+        uniform bool enableBrightnessAttenuation;
+        uniform bool enableDOF;
+
         void main() {
             vec2 coord = gl_PointCoord - vec2(0.5);
             float dist = length(coord);
-            
+
             if (dist > 0.5) {
                 discard;
             }
-            
+
+            // Circular particle with smooth edges
             float alpha = 1.0 - smoothstep(0.4, 0.5, dist);
-            outColor = vec4(fragColor, alpha * 0.8);
+            float brightnessFactor = 1.0;
+            float depthFade = 1.0;
+
+            // Atmospheric fade based on depth (toggleable)
+            if (enableDepthFade) {
+                depthFade = 1.0 - smoothstep(depthFadeStart, depthFadeEnd, depth);
+                alpha *= depthFade;
+            }
+
+            // Brightness attenuation with distance (toggleable)
+            if (enableBrightnessAttenuation) {
+                brightnessFactor = mix(brightnessMin, 1.0, depthFade);
+            }
+
+            // Depth-of-field effect (toggleable)
+            if (enableDOF && apertureSize > 0.0) {
+                float distFromFocus = abs(depth - focusDistance);
+                float dofBlur = distFromFocus / (500.0 * apertureSize);
+                dofBlur = clamp(dofBlur, 0.0, 1.0);
+
+                // Out-of-focus particles: reduce alpha and soften edges
+                alpha *= 1.0 - (dofBlur * 0.7);
+                brightnessFactor *= 1.0 - (dofBlur * 0.5);
+
+                // Soften particle edges when out of focus
+                float edgeSoftness = mix(0.4, 0.2, dofBlur);
+                alpha *= 1.0 - smoothstep(edgeSoftness, 0.5, dist);
+            }
+
+            outColor = vec4(fragColor * brightnessFactor, alpha * 0.8);
         }
     )";
     
@@ -259,31 +318,57 @@ void CellFlowWidget::initializeQuadBuffer() {
 void CellFlowWidget::resizeGL(int w, int h) {
     windowWidth = w;
     windowHeight = h;
-    params.canvasWidth = w;
-    params.canvasHeight = h;
-    
+    // Keep canvas dimensions independent of viewport size
+    // Universe size stays at 8000x8000x8000
+
     glViewport(0, 0, w, h);
-    
-    // Update simulation canvas dimensions
-    simulation->updateCanvasDimensions(w, h);
-    
+
+    // Don't update simulation canvas dimensions on window resize
+    // The simulation space is independent of viewport size
+
     // Recreate effect FBO at new size
     cleanupEffectResources();
     effectFBO = new QOpenGLFramebufferObject(w, h);
 }
 
 void CellFlowWidget::paintGL() {
+    // Update simulation before rendering (driven by vsync for perfect frame pacing)
+    static int frameCounter = 0;
+
+    // Update LFO if active
+    if (params.lfoA != 0.0f) {
+        float t = frameTimer.elapsed() / 1000.0f;
+        float lfo = params.lfoA * sin(2.0f * M_PI * params.lfoS * t);
+        params.ratioWithLFO = params.ratio + lfo;
+    } else {
+        params.ratioWithLFO = params.ratio;
+    }
+
+    // Run simulation
+    simulation->simulate(params);
+
+    // Get updated particle data
+    simulation->getParticleData(particleData);
+
+    // Debug output every 60 frames
+    if (frameCounter++ % 60 == 0 && !particleData.empty()) {
+        std::cout << "Frame " << frameCounter << ": " << particleData.size() << " particles, "
+                  << "First particle at (" << particleData[0].pos.x << ", "
+                  << particleData[0].pos.y << ", " << particleData[0].pos.z << ")"
+                  << std::endl;
+    }
+
     // Always ensure we're rendering to the default framebuffer and clear it
     glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
     glViewport(0, 0, windowWidth, windowHeight);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-    
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
     if (!shaderProgram) {
         std::cout << "No shader program!" << std::endl;
         return;
     }
-    
+
     if (particleData.empty()) {
         std::cout << "No particle data!" << std::endl;
         return;
@@ -303,20 +388,64 @@ void CellFlowWidget::paintGL() {
     // Always use normal point sprite rendering for now
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    
+
     shaderProgram->bind();
     vao.bind();
-    
-    // Bind the particle buffer and set up vertex attributes
+
+    // Bind the particle buffer and set up vertex attributes (3D position + type)
     particleBuffer.bind();
     shaderProgram->enableAttributeArray(0);
-    shaderProgram->setAttributeBuffer(0, GL_FLOAT, 0, 2, 3 * sizeof(float));
+    shaderProgram->setAttributeBuffer(0, GL_FLOAT, 0, 3, 4 * sizeof(float));  // 3D position
     shaderProgram->enableAttributeArray(1);
-    shaderProgram->setAttributeBuffer(1, GL_FLOAT, 2 * sizeof(float), 1, 3 * sizeof(float));
+    shaderProgram->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 1, 4 * sizeof(float));  // particle type
+
+    // Calculate camera position from orbital parameters
+    float radX = cameraRotationX * M_PI / 180.0f;
+    float radY = cameraRotationY * M_PI / 180.0f;
+    cameraPosX = cameraTargetX + cameraDistance * cos(radX) * sin(radY);
+    cameraPosY = cameraTargetY + cameraDistance * sin(radX);
+    cameraPosZ = cameraTargetZ + cameraDistance * cos(radX) * cos(radY);
+
+    // Create view matrix (lookAt)
+    QVector3D eye(cameraPosX, cameraPosY, cameraPosZ);
+    QVector3D center(cameraTargetX, cameraTargetY, cameraTargetZ);
+    QVector3D up(0.0f, 1.0f, 0.0f);
+
+    QMatrix4x4 viewMatrix;
+    viewMatrix.lookAt(eye, center, up);
+
+    // Create projection matrix (perspective) with universe-scaled clipping
+    QMatrix4x4 projMatrix;
+    float aspect = (float)windowWidth / (float)windowHeight;
+
+    // Calculate clipping planes based on universe size
+    float maxUniverseSize = fmax(params.canvasWidth, fmax(params.canvasHeight, params.canvasDepth));
+    float universeDiagonal = sqrt(params.canvasWidth * params.canvasWidth +
+                                  params.canvasHeight * params.canvasHeight +
+                                  params.canvasDepth * params.canvasDepth);
+
+    float nearPlane = maxUniverseSize * 0.01f;  // 1% of universe size
+    float farPlane = universeDiagonal * 2.5f;    // 2.5x diagonal to see entire universe from any angle
+
+    projMatrix.perspective(45.0f, aspect, nearPlane, farPlane);
 
     // Set uniforms
-    shaderProgram->setUniformValue("canvasSize", QVector2D(params.canvasWidth, params.canvasHeight));
+    shaderProgram->setUniformValue("viewMatrix", viewMatrix);
+    shaderProgram->setUniformValue("projMatrix", projMatrix);
+    shaderProgram->setUniformValue("canvasSize", QVector3D(params.canvasWidth, params.canvasHeight, params.canvasDepth));
     shaderProgram->setUniformValue("pointSize", params.pointSize);
+    shaderProgram->setUniformValue("sizeAttenuationFactor", params.sizeAttenuationFactor);
+    shaderProgram->setUniformValue("depthFadeStart", params.depthFadeStart);
+    shaderProgram->setUniformValue("depthFadeEnd", params.depthFadeEnd);
+    shaderProgram->setUniformValue("brightnessMin", params.brightnessMin);
+    shaderProgram->setUniformValue("focusDistance", params.focusDistance);
+    shaderProgram->setUniformValue("apertureSize", params.apertureSize);
+
+    // Effect enable/disable flags
+    shaderProgram->setUniformValue("enableSizeAttenuation", params.enableSizeAttenuation);
+    shaderProgram->setUniformValue("enableDepthFade", params.enableDepthFade);
+    shaderProgram->setUniformValue("enableBrightnessAttenuation", params.enableBrightnessAttenuation);
+    shaderProgram->setUniformValue("enableDOF", params.enableDOF);
 
     // Set particle colors
     for (int i = 0; i < params.numParticleTypes; ++i) {
@@ -355,52 +484,51 @@ void CellFlowWidget::paintGL() {
         frameCount = 0;
         lastFPSUpdate = currentTime;
     }
+
+    // Frame rate limiting (if enabled)
+    bool shouldUpdate = true;
+    if (frameRateCap > 0) {
+        qint64 targetFrameTime = 1000 / frameRateCap;  // ms per frame
+        qint64 timeSinceLastFrame = currentTime - lastFrameTime;
+        shouldUpdate = timeSinceLastFrame >= targetFrameTime;
+    }
+
+    // Request next frame (creates continuous vsync-locked update loop)
+    if (shouldUpdate) {
+        lastFrameTime = currentTime;
+        update();
+    } else {
+        // Schedule update for remaining time to hit target frame rate
+        int remainingTime = (1000 / frameRateCap) - (currentTime - lastFrameTime);
+        if (remainingTime > 0) {
+            QTimer::singleShot(remainingTime, this, [this]() { update(); });
+        }
+    }
 }
 
 void CellFlowWidget::updateSimulation() {
-    static int frameCounter = 0;
-    
-    // Update LFO if active
-    if (params.lfoA != 0.0f) {
-        float t = frameTimer.elapsed() / 1000.0f;
-        float lfo = params.lfoA * sin(2.0f * M_PI * params.lfoS * t);
-        params.ratioWithLFO = params.ratio + lfo;
-    } else {
-        params.ratioWithLFO = params.ratio;
-    }
-    
-    // Run simulation
-    simulation->simulate(params);
-    
-    // Get updated particle data
-    simulation->getParticleData(particleData);
-    
-    // Debug output every 60 frames
-    if (frameCounter++ % 60 == 0 && !particleData.empty()) {
-        std::cout << "Frame " << frameCounter << ": " << particleData.size() << " particles, "
-                  << "First particle at (" << particleData[0].pos.x << ", " << particleData[0].pos.y << ")" 
-                  << std::endl;
-    }
-    
-    update(); // Trigger repaint
+    // Simulation now runs directly in paintGL() for perfect vsync sync
+    // This method just triggers a repaint if called manually
+    update();
 }
 
 void CellFlowWidget::updateParticleBuffer() {
     if (particleData.empty()) return;
-    
+
     // Just update the buffer data - no attribute setup here
     particleBuffer.bind();
-    
-    // Prepare data for GPU (position + type)
+
+    // Prepare data for GPU (3D position + type)
     std::vector<float> vertexData;
-    vertexData.reserve(particleData.size() * 3); // x, y, type
-    
+    vertexData.reserve(particleData.size() * 4); // x, y, z, type
+
     for (const auto& p : particleData) {
         vertexData.push_back(p.pos.x);
         vertexData.push_back(p.pos.y);
+        vertexData.push_back(p.pos.z);
         vertexData.push_back(static_cast<float>(p.ptype));
     }
-    
+
     particleBuffer.allocate(vertexData.data(), vertexData.size() * sizeof(float));
     particleBuffer.release();
 }
@@ -496,6 +624,15 @@ void CellFlowWidget::setNumParticleTypes(int types) {
     simulation->setNumParticleTypes(types);
 }
 
+void CellFlowWidget::setUniverseSize(float size) {
+    params.canvasWidth = size;
+    params.canvasHeight = size;
+    params.canvasDepth = size;
+    simulation->updateCanvasDimensions(size, size);
+    // Reinitialize particles in new space
+    simulation->initializeParticles(size, size);
+}
+
 int CellFlowWidget::getParticleCount() const {
     return simulation->getParticleCount();
 }
@@ -560,6 +697,65 @@ void CellFlowWidget::setPointSize(float value) {
 void CellFlowWidget::setEffectType(int type) {
     currentEffectType = type;
     update();  // Force redraw
+}
+
+// Depth effect setters
+void CellFlowWidget::setDepthFadeStart(float value) {
+    params.depthFadeStart = value;
+}
+
+void CellFlowWidget::setDepthFadeEnd(float value) {
+    params.depthFadeEnd = value;
+}
+
+void CellFlowWidget::setSizeAttenuationFactor(float value) {
+    params.sizeAttenuationFactor = value;
+}
+
+void CellFlowWidget::setBrightnessMin(float value) {
+    params.brightnessMin = value;
+}
+
+// Depth-of-field setters
+void CellFlowWidget::setFocusDistance(float value) {
+    params.focusDistance = value;
+}
+
+void CellFlowWidget::setApertureSize(float value) {
+    params.apertureSize = value;
+}
+
+// Effect enable/disable setters
+void CellFlowWidget::setEnableDepthFade(bool enabled) {
+    params.enableDepthFade = enabled;
+}
+
+void CellFlowWidget::setEnableSizeAttenuation(bool enabled) {
+    params.enableSizeAttenuation = enabled;
+}
+
+void CellFlowWidget::setEnableBrightnessAttenuation(bool enabled) {
+    params.enableBrightnessAttenuation = enabled;
+}
+
+void CellFlowWidget::setEnableDOF(bool enabled) {
+    params.enableDOF = enabled;
+}
+
+void CellFlowWidget::setInvertPan(bool inverted) {
+    invertPan = inverted;
+}
+
+void CellFlowWidget::setInvertForwardBack(bool inverted) {
+    invertForwardBack = inverted;
+}
+
+void CellFlowWidget::setInvertRotation(bool inverted) {
+    invertRotation = inverted;
+}
+
+void CellFlowWidget::setFrameRateCap(int capFps) {
+    frameRateCap = capFps;
 }
 
 
@@ -676,7 +872,37 @@ bool CellFlowWidget::loadPreset(const QString& filename) {
     if (obj.contains("lfoS")) params.lfoS = obj["lfoS"].toDouble();
     if (obj.contains("forceOffset")) params.forceOffset = obj["forceOffset"].toDouble();
     if (obj.contains("pointSize")) params.pointSize = obj["pointSize"].toDouble();
-    
+
+    // Load universe size
+    if (obj.contains("canvasWidth")) params.canvasWidth = obj["canvasWidth"].toDouble();
+    if (obj.contains("canvasHeight")) params.canvasHeight = obj["canvasHeight"].toDouble();
+    if (obj.contains("canvasDepth")) params.canvasDepth = obj["canvasDepth"].toDouble();
+    if (obj.contains("spawnRegionSize")) params.spawnRegionSize = obj["spawnRegionSize"].toDouble();
+
+    // Load depth effect parameters
+    if (obj.contains("depthFadeStart")) params.depthFadeStart = obj["depthFadeStart"].toDouble();
+    if (obj.contains("depthFadeEnd")) params.depthFadeEnd = obj["depthFadeEnd"].toDouble();
+    if (obj.contains("sizeAttenuationFactor")) params.sizeAttenuationFactor = obj["sizeAttenuationFactor"].toDouble();
+    if (obj.contains("brightnessMin")) params.brightnessMin = obj["brightnessMin"].toDouble();
+
+    // Load DOF parameters
+    if (obj.contains("focusDistance")) params.focusDistance = obj["focusDistance"].toDouble();
+    if (obj.contains("apertureSize")) params.apertureSize = obj["apertureSize"].toDouble();
+
+    // Load effect enable/disable flags
+    if (obj.contains("enableDepthFade")) params.enableDepthFade = obj["enableDepthFade"].toBool();
+    if (obj.contains("enableSizeAttenuation")) params.enableSizeAttenuation = obj["enableSizeAttenuation"].toBool();
+    if (obj.contains("enableBrightnessAttenuation")) params.enableBrightnessAttenuation = obj["enableBrightnessAttenuation"].toBool();
+    if (obj.contains("enableDOF")) params.enableDOF = obj["enableDOF"].toBool();
+
+    // Load camera navigation preferences
+    if (obj.contains("invertPan")) invertPan = obj["invertPan"].toBool();
+    if (obj.contains("invertForwardBack")) invertForwardBack = obj["invertForwardBack"].toBool();
+    if (obj.contains("invertRotation")) invertRotation = obj["invertRotation"].toBool();
+
+    // Load current effect type
+    if (obj.contains("effectType")) currentEffectType = obj["effectType"].toInt();
+
     // Load particle colors
     if (obj.contains("particleColors")) {
         QJsonArray colorsArray = obj["particleColors"].toArray();
@@ -746,7 +972,37 @@ bool CellFlowWidget::savePreset(const QString& filename) {
     obj["lfoS"] = params.lfoS;
     obj["forceOffset"] = params.forceOffset;
     obj["pointSize"] = params.pointSize;
-    
+
+    // Save universe size
+    obj["canvasWidth"] = params.canvasWidth;
+    obj["canvasHeight"] = params.canvasHeight;
+    obj["canvasDepth"] = params.canvasDepth;
+    obj["spawnRegionSize"] = params.spawnRegionSize;
+
+    // Save depth effect parameters
+    obj["depthFadeStart"] = params.depthFadeStart;
+    obj["depthFadeEnd"] = params.depthFadeEnd;
+    obj["sizeAttenuationFactor"] = params.sizeAttenuationFactor;
+    obj["brightnessMin"] = params.brightnessMin;
+
+    // Save DOF parameters
+    obj["focusDistance"] = params.focusDistance;
+    obj["apertureSize"] = params.apertureSize;
+
+    // Save effect enable/disable flags
+    obj["enableDepthFade"] = params.enableDepthFade;
+    obj["enableSizeAttenuation"] = params.enableSizeAttenuation;
+    obj["enableBrightnessAttenuation"] = params.enableBrightnessAttenuation;
+    obj["enableDOF"] = params.enableDOF;
+
+    // Save camera navigation preferences
+    obj["invertPan"] = invertPan;
+    obj["invertForwardBack"] = invertForwardBack;
+    obj["invertRotation"] = invertRotation;
+
+    // Save current effect type
+    obj["effectType"] = currentEffectType;
+
     // Save particle colors
     QJsonArray colorsArray;
     for (int i = 0; i < params.numParticleTypes && i < particleColors.size(); i++) {
@@ -783,4 +1039,107 @@ bool CellFlowWidget::savePreset(const QString& filename) {
     
     file.write(doc.toJson());
     return true;
+}
+
+// Mouse event handlers for orbital camera
+void CellFlowWidget::mousePressEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton) {
+        isLeftMousePressed = true;
+        lastMousePos = event->pos();
+    } else if (event->button() == Qt::RightButton) {
+        isRightMousePressed = true;
+        lastMousePos = event->pos();
+    }
+    QOpenGLWidget::mousePressEvent(event);
+}
+
+void CellFlowWidget::mouseReleaseEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton) {
+        isLeftMousePressed = false;
+    } else if (event->button() == Qt::RightButton) {
+        isRightMousePressed = false;
+    }
+    QOpenGLWidget::mouseReleaseEvent(event);
+}
+
+void CellFlowWidget::mouseMoveEvent(QMouseEvent* event) {
+    QPoint delta = event->pos() - lastMousePos;
+    lastMousePos = event->pos();
+
+    if (isLeftMousePressed) {
+        // Rotate camera (orbit)
+        cameraRotationY += delta.x() * 0.5f;
+        cameraRotationX -= delta.y() * 0.5f;
+
+        // Clamp X rotation to avoid gimbal lock
+        cameraRotationX = fmax(-89.0f, fmin(89.0f, cameraRotationX));
+
+        update(); // Trigger repaint
+    } else if (isRightMousePressed) {
+        bool shiftPressed = event->modifiers() & Qt::ShiftModifier;
+
+        if (shiftPressed) {
+            // Shift+Right: Rotate with horizontal movement
+            int rotMultiplier = invertRotation ? -1 : 1;
+            cameraRotationY += delta.x() * 0.5f * rotMultiplier;
+
+            // Shift+Right: Translate forward/backward with vertical movement
+            int forwardMultiplier = invertForwardBack ? -1 : 1;
+            float radX = cameraRotationX * M_PI / 180.0f;
+            float radY = cameraRotationY * M_PI / 180.0f;
+
+            QVector3D forward(
+                cos(radX) * sin(radY),
+                sin(radX),
+                cos(radX) * cos(radY)
+            );
+
+            float moveSpeed = cameraDistance * 0.002f;
+            cameraTargetX += forward.x() * delta.y() * moveSpeed * forwardMultiplier;
+            cameraTargetY += forward.y() * delta.y() * moveSpeed * forwardMultiplier;
+            cameraTargetZ += forward.z() * delta.y() * moveSpeed * forwardMultiplier;
+        } else {
+            // Right: Pan camera (translate based on camera orientation)
+            int panMultiplier = invertPan ? -1 : 1;
+            float radX = cameraRotationX * M_PI / 180.0f;
+            float radY = cameraRotationY * M_PI / 180.0f;
+
+            // Calculate camera's right and up vectors
+            QVector3D forward(
+                cos(radX) * sin(radY),
+                sin(radX),
+                cos(radX) * cos(radY)
+            );
+            QVector3D up(0.0f, 1.0f, 0.0f);
+            QVector3D right = QVector3D::crossProduct(forward, up).normalized();
+            QVector3D cameraUp = QVector3D::crossProduct(right, forward).normalized();
+
+            // Pan speed based on distance from target
+            float panSpeed = cameraDistance * 0.001f;
+
+            // Move target in camera space
+            cameraTargetX -= right.x() * delta.x() * panSpeed * panMultiplier;
+            cameraTargetY -= right.y() * delta.x() * panSpeed * panMultiplier;
+            cameraTargetZ -= right.z() * delta.x() * panSpeed * panMultiplier;
+
+            cameraTargetX += cameraUp.x() * delta.y() * panSpeed * panMultiplier;
+            cameraTargetY += cameraUp.y() * delta.y() * panSpeed * panMultiplier;
+            cameraTargetZ += cameraUp.z() * delta.y() * panSpeed * panMultiplier;
+        }
+
+        update(); // Trigger repaint
+    }
+    QOpenGLWidget::mouseMoveEvent(event);
+}
+
+void CellFlowWidget::wheelEvent(QWheelEvent* event) {
+    // Zoom with mouse wheel
+    float delta = event->angleDelta().y() / 120.0f;
+    cameraDistance -= delta * 200.0f;  // Faster zoom for larger space
+
+    // Clamp camera distance (wider range for larger universe)
+    cameraDistance = fmax(1000.0f, fmin(12000.0f, cameraDistance));
+
+    update(); // Trigger repaint
+    QOpenGLWidget::wheelEvent(event);
 }

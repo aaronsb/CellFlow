@@ -17,6 +17,7 @@ int main(int argc, char* argv[]) {
     format.setStencilBufferSize(8);
     format.setSamples(0); // Disable multisampling initially
     format.setSwapInterval(1); // VSync
+    format.setSwapBehavior(QSurfaceFormat::DoubleBuffer); // Explicit double buffering
     format.setOption(QSurfaceFormat::DebugContext, false);
     QSurfaceFormat::setDefaultFormat(format);
     

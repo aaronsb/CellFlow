@@ -61,6 +61,7 @@ private:
     int numParticleTypes;
     float currentCanvasWidth;
     float currentCanvasHeight;
+    float currentCanvasDepth;
     
     // Device memory
     Particle* d_particles;
@@ -85,11 +86,13 @@ private:
 
 // CUDA kernel declarations
 __global__ void initializeParticlesKernel(
-    Particle* particles, 
-    int particleCount, 
+    Particle* particles,
+    int particleCount,
     int numTypes,
-    float canvasWidth, 
+    float canvasWidth,
     float canvasHeight,
+    float canvasDepth,
+    float spawnRegionSize,
     curandState* states
 );
 
@@ -108,8 +111,10 @@ __global__ void moveParticlesKernel(
     int particleCount,
     float dx,
     float dy,
+    float dz,
     float canvasWidth,
-    float canvasHeight
+    float canvasHeight,
+    float canvasDepth
 );
 
 #endif // PARTICLE_SIMULATION_CUH

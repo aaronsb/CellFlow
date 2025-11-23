@@ -50,6 +50,7 @@ public:
 
 private slots:
     void onParticleCountConfirmed();
+    void onUniverseSizeConfirmed();
     void onParticleTypesChanged(int value);
     void onRadiusChanged(int value);
     void onDeltaTChanged(int value);
@@ -68,6 +69,16 @@ private slots:
     void onPointSizeChanged(int value);
     void onEffectChanged(int index);
     void onTooltipToggled(bool checked);
+
+    // Depth effect slots
+    void onDepthFadeStartChanged(int value);
+    void onDepthFadeEndChanged(int value);
+    void onSizeAttenuationChanged(int value);
+    void onBrightnessMinChanged(int value);
+
+    // DOF slots
+    void onFocusDistanceChanged(int value);
+    void onApertureSizeChanged(int value);
     
     void onRegenerateClicked();
     void onResetClicked();
@@ -96,6 +107,7 @@ private:
     
     // Control widgets
     QLineEdit* particleCountEdit;
+    QLineEdit* universeSizeEdit;
     QSpinBox* particleTypesSpinBox;
     
     QSlider* radiusSlider;
@@ -113,7 +125,17 @@ private:
     QSlider* lfoSSlider;
     QSlider* forceOffsetSlider;
     QSlider* pointSizeSlider;
-    
+
+    // Depth effect sliders
+    QSlider* depthFadeStartSlider;
+    QSlider* depthFadeEndSlider;
+    QSlider* sizeAttenuationSlider;
+    QSlider* brightnessMinSlider;
+
+    // DOF sliders
+    QSlider* focusDistanceSlider;
+    QSlider* apertureSizeSlider;
+
     // Effect selector
     QComboBox* effectComboBox;
     
@@ -133,10 +155,26 @@ private:
     QLineEdit* lfoSEdit;
     QLineEdit* forceOffsetEdit;
     QLineEdit* pointSizeEdit;
-    
+
+    // Depth effect edits
+    QLineEdit* depthFadeStartEdit;
+    QLineEdit* depthFadeEndEdit;
+    QLineEdit* sizeAttenuationEdit;
+    QLineEdit* brightnessMinEdit;
+
+    // DOF edits
+    QLineEdit* focusDistanceEdit;
+    QLineEdit* apertureSizeEdit;
+
+    // Effect enable checkboxes
+    QCheckBox* enableDepthFadeCheckbox;
+    QCheckBox* enableSizeAttenuationCheckbox;
+    QCheckBox* enableBrightnessAttenuationCheckbox;
+    QCheckBox* enableDOFCheckbox;
+
     QLabel* fpsLabel;
     QTableWidget* particleTypeTable;
-    
+
     // Tooltip control
     QCheckBox* tooltipCheckBox;
 };

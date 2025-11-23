@@ -4,23 +4,25 @@
 #include <cuda_runtime.h>
 
 struct Particle {
-    float2 pos;
-    float2 vel;
-    float2 acc;
+    float3 pos;
+    float3 vel;
+    float3 acc;
     unsigned int ptype;
-    unsigned int pad;
+    float pad;  // Changed from uint to float for better alignment
 };
 
 struct SimulationParams {
-    float radius = 50.0f;
-    float delta_t = 0.22f;
-    float friction = 0.71f;
-    float repulsion = 50.0f;
-    float attraction = 0.62f;
-    float k = 16.57f;
+    float radius = 42.07f;
+    float delta_t = 0.18f;
+    float friction = 0.51f;
+    float repulsion = 64.83f;
+    float attraction = 3.06f;
+    float k = 29.45f;
     float balance = 0.79f;
-    float canvasWidth = 1920.0f;
-    float canvasHeight = 1080.0f;
+    float canvasWidth = 8000.0f;   // Large universe independent of viewport
+    float canvasHeight = 8000.0f;
+    float canvasDepth = 8000.0f;
+    float spawnRegionSize = 2000.0f;  // Spawn particles in smaller central region
     int numParticleTypes = 6;
     float ratioWithLFO = 0.0f;
     float forceMultiplier = 2.33f;
@@ -35,7 +37,23 @@ struct SimulationParams {
     float forceOffset = 1.0f;
     
     // Rendering parameters
-    float pointSize = 4.0f;
+    float pointSize = 10.0f;  // Larger default for bigger universe
+
+    // Depth effect parameters
+    float depthFadeStart = 10000.0f;  // Effectively disabled (very far)
+    float depthFadeEnd = 15000.0f;    // Effectively disabled (very far)
+    float sizeAttenuationFactor = 1000.0f;
+    float brightnessMin = 0.4f;
+
+    // Depth-of-field parameters
+    float focusDistance = 3000.0f;  // Distance to focal plane
+    float apertureSize = 0.0f;       // 0 = everything in focus, higher = more blur
+
+    // Effect enable/disable flags
+    bool enableDepthFade = false;
+    bool enableSizeAttenuation = true;
+    bool enableBrightnessAttenuation = true;
+    bool enableDOF = false;
 };
 
 // Color definitions (RGB values 0-1)
