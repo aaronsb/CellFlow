@@ -15,7 +15,6 @@ int main(int argc, char* argv[]) {
     format.setRenderableType(QSurfaceFormat::OpenGL);
     format.setDepthBufferSize(24);
     format.setStencilBufferSize(8);
-    format.setAlphaBufferSize(0); // No alpha buffer - opaque window (fixes transparency bug)
     format.setSamples(0); // Disable multisampling initially
     format.setSwapInterval(1); // VSync
     format.setSwapBehavior(QSurfaceFormat::DoubleBuffer); // Explicit double buffering

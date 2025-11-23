@@ -12,9 +12,8 @@ CellFlowWidget::CellFlowWidget(QWidget* parent)
     : QOpenGLWidget(parent),
       simulation(std::make_unique<ParticleSimulation>(4000)),
       frameCount(0), currentFPS(0.0), lastFPSUpdate(0),
-      shaderProgram(nullptr), effectProgram(nullptr), gaussianProgram(nullptr),
+      shaderProgram(nullptr), effectProgram(nullptr),
       particleTexture(0), effectFBO(nullptr), currentEffectType(0),
-      gaussianSplattingEnabled(false),
       cameraDistance(3000.0f), cameraRotationX(30.0f), cameraRotationY(45.0f),
       cameraPosX(0.0f), cameraPosY(0.0f), cameraPosZ(0.0f),
       cameraTargetX(0.0f), cameraTargetY(0.0f), cameraTargetZ(0.0f),
@@ -44,7 +43,6 @@ CellFlowWidget::~CellFlowWidget() {
     quadVAO.destroy();
     delete shaderProgram;
     delete effectProgram;
-    delete gaussianProgram;
     if (particleTexture != 0) {
         glDeleteTextures(1, &particleTexture);
     }
@@ -70,7 +68,6 @@ void CellFlowWidget::initializeGL() {
     
     initializeShaders();
     initializeEffectShaders();
-    initializeGaussianShaders();
     initializeQuadBuffer();
     
     // Create VAO and VBO
@@ -289,109 +286,6 @@ void CellFlowWidget::initializeEffectShaders() {
         std::cout << "Effect shader linked successfully!" << std::endl;
     }
 }
-void CellFlowWidget::initializeGaussianShaders() {
-    // Gaussian splatting shader for Phase 1: simple isotropic Gaussians
-    gaussianProgram = new QOpenGLShaderProgram(this);
-
-    // Gaussian vertex shader - projects 3D Gaussians to screen space
-    const char* gaussianVertexShader = R"(
-        #version 150 core
-        in vec3 position;
-        in float particleType;
-        in float density;  // Local particle density (0-1)
-
-        uniform mat4 viewMatrix;
-        uniform mat4 projMatrix;
-        uniform vec3 particleColors[10];
-        uniform float pointSize;
-        uniform vec3 canvasSize;
-        uniform float gaussianSizeScale;
-        uniform float gaussianDensityInfluence;
-
-        out vec3 fragColor;
-        out float depth;
-        out float particleDensity;
-
-        void main() {
-            // Center the particle space around origin
-            vec3 centeredPos = position - canvasSize * 0.5;
-
-            // Apply view and projection matrices
-            vec4 viewPos = viewMatrix * vec4(centeredPos, 1.0);
-            gl_Position = projMatrix * viewPos;
-
-            // Calculate depth for sorting and size attenuation
-            depth = length(viewPos.xyz);
-
-            // Adaptive size based on density: denser clusters = larger splats
-            // densityScale ranges from 1.0 (no neighbors) to 1.0 + densityInfluence (max density)
-            float densityScale = 1.0 + (density * gaussianDensityInfluence);
-
-            // Size attenuation for Gaussian splats (larger for distant particles to maintain visual size)
-            float distanceScale = 2000.0 / depth;
-            gl_PointSize = pointSize * distanceScale * gaussianSizeScale * densityScale;
-
-            fragColor = particleColors[int(particleType)];
-            particleDensity = density;
-        }
-    )";
-
-    // Gaussian fragment shader - renders smooth Gaussian splats
-    const char* gaussianFragmentShader = R"(
-        #version 150 core
-        in vec3 fragColor;
-        in float depth;
-        in float particleDensity;
-        out vec4 outColor;
-
-        uniform float gaussianOpacityScale;
-
-        void main() {
-            // Convert point coord to [-1, 1] range centered at splat center
-            vec2 coord = (gl_PointCoord - vec2(0.5)) * 2.0;
-
-            // Calculate distance from center
-            float r = length(coord);
-
-            // Gaussian falloff: exp(-k * r²)
-            // k controls the falloff rate - higher k = tighter Gaussian
-            float k = 2.0; // Moderate falloff for visible surface blending
-            float gaussian = exp(-k * r * r);
-
-            // Discard fragments with very low contribution (optimization)
-            if (gaussian < 0.01) {
-                discard;
-            }
-
-            // Adaptive opacity based on density: denser clusters = more opaque
-            // Base opacity boosted by density for better surface visibility
-            float densityOpacity = 0.4 + (particleDensity * 0.4); // Range: 0.4-0.8
-            float alpha = gaussian * densityOpacity * gaussianOpacityScale;
-
-            outColor = vec4(fragColor, alpha);
-        }
-    )";
-
-    if (!gaussianProgram->addShaderFromSourceCode(QOpenGLShader::Vertex, gaussianVertexShader)) {
-        std::cerr << "Gaussian vertex shader compilation failed: " << gaussianProgram->log().toStdString() << std::endl;
-    }
-
-    if (!gaussianProgram->addShaderFromSourceCode(QOpenGLShader::Fragment, gaussianFragmentShader)) {
-        std::cerr << "Gaussian fragment shader compilation failed: " << gaussianProgram->log().toStdString() << std::endl;
-    }
-
-    if (!gaussianProgram->link()) {
-        std::cerr << "Gaussian shader linking failed: " << gaussianProgram->log().toStdString() << std::endl;
-    } else {
-        std::cout << "Gaussian splatting shader linked successfully!" << std::endl;
-    }
-
-    // Bind attribute locations
-    gaussianProgram->bindAttributeLocation("position", 0);
-    gaussianProgram->bindAttributeLocation("particleType", 1);
-    gaussianProgram->bindAttributeLocation("density", 2);
-}
-
 void CellFlowWidget::initializeQuadBuffer() {
     // Create fullscreen quad for effect rendering
     quadVAO.create();
@@ -483,47 +377,27 @@ void CellFlowWidget::paintGL() {
     // Clear any accumulated GL errors first
     while (glGetError() != GL_NO_ERROR) { /* clear error queue */ }
     
-    // Sort particles for Gaussian splatting (back-to-front for proper alpha blending)
-    if (gaussianSplattingEnabled) {
-        sortParticlesByDepth();
-    }
-
-    // Update particle buffer (after sorting if needed)
+    // Update particle buffer regardless of rendering mode
     updateParticleBuffer();
-
+    
     GLenum err = glGetError();
     if (err != GL_NO_ERROR) {
         std::cout << "GL error after updateParticleBuffer: " << err << std::endl;
     }
-
-    // Choose shader program based on rendering mode
-    QOpenGLShaderProgram* activeProgram = gaussianSplattingEnabled ? gaussianProgram : shaderProgram;
-
-    // Setup blending for transparent particles
+    
+    // Always use normal point sprite rendering for now
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    activeProgram->bind();
+    shaderProgram->bind();
     vao.bind();
 
-    // Bind the particle buffer and set up vertex attributes
+    // Bind the particle buffer and set up vertex attributes (3D position + type)
     particleBuffer.bind();
-
-    if (gaussianSplattingEnabled) {
-        // Gaussian mode: position (3) + type (1) + density (1) = 5 floats per vertex
-        activeProgram->enableAttributeArray(0);
-        activeProgram->setAttributeBuffer(0, GL_FLOAT, 0, 3, 5 * sizeof(float));  // 3D position
-        activeProgram->enableAttributeArray(1);
-        activeProgram->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 1, 5 * sizeof(float));  // particle type
-        activeProgram->enableAttributeArray(2);
-        activeProgram->setAttributeBuffer(2, GL_FLOAT, 4 * sizeof(float), 1, 5 * sizeof(float));  // density
-    } else {
-        // Regular mode: position (3) + type (1) = 4 floats per vertex
-        activeProgram->enableAttributeArray(0);
-        activeProgram->setAttributeBuffer(0, GL_FLOAT, 0, 3, 4 * sizeof(float));  // 3D position
-        activeProgram->enableAttributeArray(1);
-        activeProgram->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 1, 4 * sizeof(float));  // particle type
-    }
+    shaderProgram->enableAttributeArray(0);
+    shaderProgram->setAttributeBuffer(0, GL_FLOAT, 0, 3, 4 * sizeof(float));  // 3D position
+    shaderProgram->enableAttributeArray(1);
+    shaderProgram->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 1, 4 * sizeof(float));  // particle type
 
     // Calculate camera position from orbital parameters
     float radX = cameraRotationX * M_PI / 180.0f;
@@ -555,38 +429,28 @@ void CellFlowWidget::paintGL() {
 
     projMatrix.perspective(45.0f, aspect, nearPlane, farPlane);
 
-    // Set uniforms (common to both shaders)
-    activeProgram->setUniformValue("viewMatrix", viewMatrix);
-    activeProgram->setUniformValue("projMatrix", projMatrix);
-    activeProgram->setUniformValue("canvasSize", QVector3D(params.canvasWidth, params.canvasHeight, params.canvasDepth));
-    activeProgram->setUniformValue("pointSize", params.pointSize);
+    // Set uniforms
+    shaderProgram->setUniformValue("viewMatrix", viewMatrix);
+    shaderProgram->setUniformValue("projMatrix", projMatrix);
+    shaderProgram->setUniformValue("canvasSize", QVector3D(params.canvasWidth, params.canvasHeight, params.canvasDepth));
+    shaderProgram->setUniformValue("pointSize", params.pointSize);
+    shaderProgram->setUniformValue("sizeAttenuationFactor", params.sizeAttenuationFactor);
+    shaderProgram->setUniformValue("depthFadeStart", params.depthFadeStart);
+    shaderProgram->setUniformValue("depthFadeEnd", params.depthFadeEnd);
+    shaderProgram->setUniformValue("brightnessMin", params.brightnessMin);
+    shaderProgram->setUniformValue("focusDistance", params.focusDistance);
+    shaderProgram->setUniformValue("apertureSize", params.apertureSize);
 
-    // Set shader-specific uniforms
-    if (gaussianSplattingEnabled) {
-        // Gaussian-specific parameters
-        activeProgram->setUniformValue("gaussianSizeScale", params.gaussianSizeScale);
-        activeProgram->setUniformValue("gaussianOpacityScale", params.gaussianOpacityScale);
-        activeProgram->setUniformValue("gaussianDensityInfluence", params.gaussianDensityInfluence);
-    } else {
-        // Regular shader parameters
-        activeProgram->setUniformValue("sizeAttenuationFactor", params.sizeAttenuationFactor);
-        activeProgram->setUniformValue("depthFadeStart", params.depthFadeStart);
-        activeProgram->setUniformValue("depthFadeEnd", params.depthFadeEnd);
-        activeProgram->setUniformValue("brightnessMin", params.brightnessMin);
-        activeProgram->setUniformValue("focusDistance", params.focusDistance);
-        activeProgram->setUniformValue("apertureSize", params.apertureSize);
+    // Effect enable/disable flags
+    shaderProgram->setUniformValue("enableSizeAttenuation", params.enableSizeAttenuation);
+    shaderProgram->setUniformValue("enableDepthFade", params.enableDepthFade);
+    shaderProgram->setUniformValue("enableBrightnessAttenuation", params.enableBrightnessAttenuation);
+    shaderProgram->setUniformValue("enableDOF", params.enableDOF);
 
-        // Effect enable/disable flags
-        activeProgram->setUniformValue("enableSizeAttenuation", params.enableSizeAttenuation);
-        activeProgram->setUniformValue("enableDepthFade", params.enableDepthFade);
-        activeProgram->setUniformValue("enableBrightnessAttenuation", params.enableBrightnessAttenuation);
-        activeProgram->setUniformValue("enableDOF", params.enableDOF);
-    }
-
-    // Set particle colors (common to both shaders)
+    // Set particle colors
     for (int i = 0; i < params.numParticleTypes; ++i) {
         QString colorName = QString("particleColors[%1]").arg(i);
-        activeProgram->setUniformValue(colorName.toStdString().c_str(),
+        shaderProgram->setUniformValue(colorName.toStdString().c_str(), 
             QVector3D(particleColors[i].r, particleColors[i].g, particleColors[i].b));
     }
     
@@ -597,9 +461,9 @@ void CellFlowWidget::paintGL() {
     // Draw particles as points
     int particleCount = particleData.size();
     glDrawArrays(GL_POINTS, 0, particleCount);
-
+    
     vao.release();
-    activeProgram->release();
+    shaderProgram->release();
     
     err = glGetError();
     if (err != GL_NO_ERROR) {
@@ -654,61 +518,18 @@ void CellFlowWidget::updateParticleBuffer() {
     // Just update the buffer data - no attribute setup here
     particleBuffer.bind();
 
-    if (gaussianSplattingEnabled) {
-        // For Gaussian splatting: compute local density and include in vertex data
-        // Format: x, y, z, type, density
-        std::vector<float> vertexData;
-        vertexData.reserve(particleData.size() * 5);
+    // Prepare data for GPU (3D position + type)
+    std::vector<float> vertexData;
+    vertexData.reserve(particleData.size() * 4); // x, y, z, type
 
-        // Compute local density for each particle
-        float searchRadius = params.radius * 2.0f; // Use interaction radius
-        float searchRadiusSq = searchRadius * searchRadius;
-
-        for (size_t i = 0; i < particleData.size(); ++i) {
-            const auto& p = particleData[i];
-
-            // Count neighbors within search radius
-            int neighborCount = 0;
-            for (size_t j = 0; j < particleData.size(); ++j) {
-                if (i == j) continue;
-
-                const auto& other = particleData[j];
-                float dx = p.pos.x - other.pos.x;
-                float dy = p.pos.y - other.pos.y;
-                float dz = p.pos.z - other.pos.z;
-                float distSq = dx*dx + dy*dy + dz*dz;
-
-                if (distSq < searchRadiusSq) {
-                    neighborCount++;
-                }
-            }
-
-            // Normalize density (0-1 range, assuming max ~50 neighbors for typical clustering)
-            float density = std::min(neighborCount / 50.0f, 1.0f);
-
-            vertexData.push_back(p.pos.x);
-            vertexData.push_back(p.pos.y);
-            vertexData.push_back(p.pos.z);
-            vertexData.push_back(static_cast<float>(p.ptype));
-            vertexData.push_back(density);
-        }
-
-        particleBuffer.allocate(vertexData.data(), vertexData.size() * sizeof(float));
-    } else {
-        // For regular rendering: just position + type
-        std::vector<float> vertexData;
-        vertexData.reserve(particleData.size() * 4); // x, y, z, type
-
-        for (const auto& p : particleData) {
-            vertexData.push_back(p.pos.x);
-            vertexData.push_back(p.pos.y);
-            vertexData.push_back(p.pos.z);
-            vertexData.push_back(static_cast<float>(p.ptype));
-        }
-
-        particleBuffer.allocate(vertexData.data(), vertexData.size() * sizeof(float));
+    for (const auto& p : particleData) {
+        vertexData.push_back(p.pos.x);
+        vertexData.push_back(p.pos.y);
+        vertexData.push_back(p.pos.z);
+        vertexData.push_back(static_cast<float>(p.ptype));
     }
 
+    particleBuffer.allocate(vertexData.data(), vertexData.size() * sizeof(float));
     particleBuffer.release();
 }
 
@@ -745,28 +566,6 @@ void CellFlowWidget::generateParticleColors() {
         
         particleColors.push_back({r + m, g + m, b + m});
     }
-}
-
-void CellFlowWidget::sortParticlesByDepth() {
-    // Sort particles back-to-front for proper alpha blending
-    // Calculate camera position from orbital parameters
-    float radX = cameraRotationX * M_PI / 180.0f;
-    float radY = cameraRotationY * M_PI / 180.0f;
-    float camPosX = cameraTargetX + cameraDistance * cos(radX) * sin(radY);
-    float camPosY = cameraTargetY + cameraDistance * sin(radX);
-    float camPosZ = cameraTargetZ + cameraDistance * cos(radX) * cos(radY);
-
-    // Sort by distance from camera (farthest first for back-to-front rendering)
-    std::sort(particleData.begin(), particleData.end(),
-        [camPosX, camPosY, camPosZ](const Particle& a, const Particle& b) {
-            float distA = (a.pos.x - camPosX) * (a.pos.x - camPosX) +
-                          (a.pos.y - camPosY) * (a.pos.y - camPosY) +
-                          (a.pos.z - camPosZ) * (a.pos.z - camPosZ);
-            float distB = (b.pos.x - camPosX) * (b.pos.x - camPosX) +
-                          (b.pos.y - camPosY) * (b.pos.y - camPosY) +
-                          (b.pos.z - camPosZ) * (b.pos.z - camPosZ);
-            return distA > distB;  // Sort farthest first
-        });
 }
 
 void CellFlowWidget::cleanupEffectResources() {
@@ -957,23 +756,6 @@ void CellFlowWidget::setInvertRotation(bool inverted) {
 
 void CellFlowWidget::setFrameRateCap(int capFps) {
     frameRateCap = capFps;
-}
-
-void CellFlowWidget::setGaussianSplatting(bool enabled) {
-    gaussianSplattingEnabled = enabled;
-    update();  // Force redraw with new rendering mode
-}
-
-void CellFlowWidget::setGaussianSizeScale(float value) {
-    params.gaussianSizeScale = value;
-}
-
-void CellFlowWidget::setGaussianOpacityScale(float value) {
-    params.gaussianOpacityScale = value;
-}
-
-void CellFlowWidget::setGaussianDensityInfluence(float value) {
-    params.gaussianDensityInfluence = value;
 }
 
 

@@ -207,16 +207,10 @@ void MainWindow::setupUI() {
     connect(enableDOFCheckbox, &QCheckBox::toggled,
             [this](bool checked) { cellFlowWidget->setEnableDOF(checked); });
 
-    QCheckBox* gaussianSplattingCheckbox = new QCheckBox("Gaussian Splats", this);
-    gaussianSplattingCheckbox->setChecked(false);
-    connect(gaussianSplattingCheckbox, &QCheckBox::toggled,
-            [this](bool checked) { cellFlowWidget->setGaussianSplatting(checked); });
-
     togglesLayout->addWidget(enableDepthFadeCheckbox, 0, 0);
     togglesLayout->addWidget(enableSizeAttenuationCheckbox, 0, 1);
     togglesLayout->addWidget(enableBrightnessAttenuationCheckbox, 1, 0);
     togglesLayout->addWidget(enableDOFCheckbox, 1, 1);
-    togglesLayout->addWidget(gaussianSplattingCheckbox, 2, 0, 1, 2);  // Span 2 columns for prominence
 
     renderLayout->addWidget(effectTogglesWidget);
 
@@ -234,15 +228,7 @@ void MainWindow::setupUI() {
     effectLayout->addWidget(effectComboBox);
     effectLayout->addStretch();
     renderLayout->addLayout(effectLayout);
-
-    // Gaussian splatting controls (shown when Gaussian mode is active)
-    QLabel* gaussianLabel = new QLabel("Gaussian Splatting:", this);
-    gaussianLabel->setStyleSheet("font-weight: bold; margin-top: 5px;");
-    renderLayout->addWidget(gaussianLabel);
-    renderLayout->addWidget(createControlGroup("G Size", gaussianSizeSlider, gaussianSizeEdit, 0.5, 5.0, 2.0, 0.1));
-    renderLayout->addWidget(createControlGroup("G Opacity", gaussianOpacitySlider, gaussianOpacityEdit, 0.1, 2.0, 1.0, 0.1));
-    renderLayout->addWidget(createControlGroup("G Density", gaussianDensitySlider, gaussianDensityEdit, 0.0, 2.0, 0.5, 0.1));
-
+    
     controlLayout->addWidget(renderGroup);
 
     // 3D Navigation
@@ -443,9 +429,6 @@ QWidget* MainWindow::createControlGroup(const QString& label, QSlider*& slider,
     else if (label == "Bright Min") connect(slider, &QSlider::valueChanged, this, &MainWindow::onBrightnessMinChanged);
     else if (label == "Focus Dist") connect(slider, &QSlider::valueChanged, this, &MainWindow::onFocusDistanceChanged);
     else if (label == "Aperture") connect(slider, &QSlider::valueChanged, this, &MainWindow::onApertureSizeChanged);
-    else if (label == "G Size") connect(slider, &QSlider::valueChanged, this, &MainWindow::onGaussianSizeChanged);
-    else if (label == "G Opacity") connect(slider, &QSlider::valueChanged, this, &MainWindow::onGaussianOpacityChanged);
-    else if (label == "G Density") connect(slider, &QSlider::valueChanged, this, &MainWindow::onGaussianDensityChanged);
 
     return widget;
 }
@@ -598,22 +581,6 @@ void MainWindow::onFocusDistanceChanged(int value) {
 void MainWindow::onApertureSizeChanged(int value) {
     double v = value * 0.1;
     cellFlowWidget->setApertureSize(v);
-}
-
-// Gaussian splatting slots
-void MainWindow::onGaussianSizeChanged(int value) {
-    double v = value * 0.1;
-    cellFlowWidget->setGaussianSizeScale(v);
-}
-
-void MainWindow::onGaussianOpacityChanged(int value) {
-    double v = value * 0.1;
-    cellFlowWidget->setGaussianOpacityScale(v);
-}
-
-void MainWindow::onGaussianDensityChanged(int value) {
-    double v = value * 0.1;
-    cellFlowWidget->setGaussianDensityInfluence(v);
 }
 
 void MainWindow::onEffectChanged(int index) {
