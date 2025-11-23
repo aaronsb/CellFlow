@@ -207,10 +207,16 @@ void MainWindow::setupUI() {
     connect(enableDOFCheckbox, &QCheckBox::toggled,
             [this](bool checked) { cellFlowWidget->setEnableDOF(checked); });
 
+    QCheckBox* gaussianSplattingCheckbox = new QCheckBox("Gaussian Splats", this);
+    gaussianSplattingCheckbox->setChecked(false);
+    connect(gaussianSplattingCheckbox, &QCheckBox::toggled,
+            [this](bool checked) { cellFlowWidget->setGaussianSplatting(checked); });
+
     togglesLayout->addWidget(enableDepthFadeCheckbox, 0, 0);
     togglesLayout->addWidget(enableSizeAttenuationCheckbox, 0, 1);
     togglesLayout->addWidget(enableBrightnessAttenuationCheckbox, 1, 0);
     togglesLayout->addWidget(enableDOFCheckbox, 1, 1);
+    togglesLayout->addWidget(gaussianSplattingCheckbox, 2, 0, 1, 2);  // Span 2 columns for prominence
 
     renderLayout->addWidget(effectTogglesWidget);
 

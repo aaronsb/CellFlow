@@ -12,8 +12,9 @@ CellFlowWidget::CellFlowWidget(QWidget* parent)
     : QOpenGLWidget(parent),
       simulation(std::make_unique<ParticleSimulation>(4000)),
       frameCount(0), currentFPS(0.0), lastFPSUpdate(0),
-      shaderProgram(nullptr), effectProgram(nullptr),
+      shaderProgram(nullptr), effectProgram(nullptr), gaussianProgram(nullptr),
       particleTexture(0), effectFBO(nullptr), currentEffectType(0),
+      gaussianSplattingEnabled(false),
       cameraDistance(3000.0f), cameraRotationX(30.0f), cameraRotationY(45.0f),
       cameraPosX(0.0f), cameraPosY(0.0f), cameraPosZ(0.0f),
       cameraTargetX(0.0f), cameraTargetY(0.0f), cameraTargetZ(0.0f),
@@ -43,6 +44,7 @@ CellFlowWidget::~CellFlowWidget() {
     quadVAO.destroy();
     delete shaderProgram;
     delete effectProgram;
+    delete gaussianProgram;
     if (particleTexture != 0) {
         glDeleteTextures(1, &particleTexture);
     }
@@ -68,6 +70,7 @@ void CellFlowWidget::initializeGL() {
     
     initializeShaders();
     initializeEffectShaders();
+    initializeGaussianShaders();
     initializeQuadBuffer();
     
     // Create VAO and VBO
@@ -286,6 +289,95 @@ void CellFlowWidget::initializeEffectShaders() {
         std::cout << "Effect shader linked successfully!" << std::endl;
     }
 }
+void CellFlowWidget::initializeGaussianShaders() {
+    // Gaussian splatting shader for Phase 1: simple isotropic Gaussians
+    gaussianProgram = new QOpenGLShaderProgram(this);
+
+    // Gaussian vertex shader - projects 3D Gaussians to screen space
+    const char* gaussianVertexShader = R"(
+        #version 150 core
+        in vec3 position;
+        in float particleType;
+
+        uniform mat4 viewMatrix;
+        uniform mat4 projMatrix;
+        uniform vec3 particleColors[10];
+        uniform float pointSize;
+        uniform vec3 canvasSize;
+
+        out vec3 fragColor;
+        out float depth;
+
+        void main() {
+            // Center the particle space around origin
+            vec3 centeredPos = position - canvasSize * 0.5;
+
+            // Apply view and projection matrices
+            vec4 viewPos = viewMatrix * vec4(centeredPos, 1.0);
+            gl_Position = projMatrix * viewPos;
+
+            // Calculate depth for sorting and size attenuation
+            depth = length(viewPos.xyz);
+
+            // Size attenuation for Gaussian splats (larger for distant particles to maintain visual size)
+            float distanceScale = 2000.0 / depth;
+            gl_PointSize = pointSize * distanceScale * 2.0; // 2x larger for Gaussian falloff
+
+            fragColor = particleColors[int(particleType)];
+        }
+    )";
+
+    // Gaussian fragment shader - renders smooth Gaussian splats
+    const char* gaussianFragmentShader = R"(
+        #version 150 core
+        in vec3 fragColor;
+        in float depth;
+        out vec4 outColor;
+
+        void main() {
+            // Convert point coord to [-1, 1] range centered at splat center
+            vec2 coord = (gl_PointCoord - vec2(0.5)) * 2.0;
+
+            // Calculate distance from center
+            float r = length(coord);
+
+            // Gaussian falloff: exp(-k * r²)
+            // k controls the falloff rate - higher k = tighter Gaussian
+            float k = 2.0; // Moderate falloff for visible surface blending
+            float gaussian = exp(-k * r * r);
+
+            // Discard fragments with very low contribution (optimization)
+            if (gaussian < 0.01) {
+                discard;
+            }
+
+            // Alpha blending with Gaussian falloff
+            // Higher opacity for Phase 1 to make surfaces visible
+            float alpha = gaussian * 0.6;
+
+            outColor = vec4(fragColor, alpha);
+        }
+    )";
+
+    if (!gaussianProgram->addShaderFromSourceCode(QOpenGLShader::Vertex, gaussianVertexShader)) {
+        std::cerr << "Gaussian vertex shader compilation failed: " << gaussianProgram->log().toStdString() << std::endl;
+    }
+
+    if (!gaussianProgram->addShaderFromSourceCode(QOpenGLShader::Fragment, gaussianFragmentShader)) {
+        std::cerr << "Gaussian fragment shader compilation failed: " << gaussianProgram->log().toStdString() << std::endl;
+    }
+
+    if (!gaussianProgram->link()) {
+        std::cerr << "Gaussian shader linking failed: " << gaussianProgram->log().toStdString() << std::endl;
+    } else {
+        std::cout << "Gaussian splatting shader linked successfully!" << std::endl;
+    }
+
+    // Bind attribute locations (same as regular shader)
+    gaussianProgram->bindAttributeLocation("position", 0);
+    gaussianProgram->bindAttributeLocation("particleType", 1);
+}
+
 void CellFlowWidget::initializeQuadBuffer() {
     // Create fullscreen quad for effect rendering
     quadVAO.create();
@@ -377,27 +469,35 @@ void CellFlowWidget::paintGL() {
     // Clear any accumulated GL errors first
     while (glGetError() != GL_NO_ERROR) { /* clear error queue */ }
     
-    // Update particle buffer regardless of rendering mode
+    // Sort particles for Gaussian splatting (back-to-front for proper alpha blending)
+    if (gaussianSplattingEnabled) {
+        sortParticlesByDepth();
+    }
+
+    // Update particle buffer (after sorting if needed)
     updateParticleBuffer();
-    
+
     GLenum err = glGetError();
     if (err != GL_NO_ERROR) {
         std::cout << "GL error after updateParticleBuffer: " << err << std::endl;
     }
-    
-    // Always use normal point sprite rendering for now
+
+    // Choose shader program based on rendering mode
+    QOpenGLShaderProgram* activeProgram = gaussianSplattingEnabled ? gaussianProgram : shaderProgram;
+
+    // Setup blending for transparent particles
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    shaderProgram->bind();
+    activeProgram->bind();
     vao.bind();
 
     // Bind the particle buffer and set up vertex attributes (3D position + type)
     particleBuffer.bind();
-    shaderProgram->enableAttributeArray(0);
-    shaderProgram->setAttributeBuffer(0, GL_FLOAT, 0, 3, 4 * sizeof(float));  // 3D position
-    shaderProgram->enableAttributeArray(1);
-    shaderProgram->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 1, 4 * sizeof(float));  // particle type
+    activeProgram->enableAttributeArray(0);
+    activeProgram->setAttributeBuffer(0, GL_FLOAT, 0, 3, 4 * sizeof(float));  // 3D position
+    activeProgram->enableAttributeArray(1);
+    activeProgram->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 1, 4 * sizeof(float));  // particle type
 
     // Calculate camera position from orbital parameters
     float radX = cameraRotationX * M_PI / 180.0f;
@@ -429,28 +529,32 @@ void CellFlowWidget::paintGL() {
 
     projMatrix.perspective(45.0f, aspect, nearPlane, farPlane);
 
-    // Set uniforms
-    shaderProgram->setUniformValue("viewMatrix", viewMatrix);
-    shaderProgram->setUniformValue("projMatrix", projMatrix);
-    shaderProgram->setUniformValue("canvasSize", QVector3D(params.canvasWidth, params.canvasHeight, params.canvasDepth));
-    shaderProgram->setUniformValue("pointSize", params.pointSize);
-    shaderProgram->setUniformValue("sizeAttenuationFactor", params.sizeAttenuationFactor);
-    shaderProgram->setUniformValue("depthFadeStart", params.depthFadeStart);
-    shaderProgram->setUniformValue("depthFadeEnd", params.depthFadeEnd);
-    shaderProgram->setUniformValue("brightnessMin", params.brightnessMin);
-    shaderProgram->setUniformValue("focusDistance", params.focusDistance);
-    shaderProgram->setUniformValue("apertureSize", params.apertureSize);
+    // Set uniforms (common to both shaders)
+    activeProgram->setUniformValue("viewMatrix", viewMatrix);
+    activeProgram->setUniformValue("projMatrix", projMatrix);
+    activeProgram->setUniformValue("canvasSize", QVector3D(params.canvasWidth, params.canvasHeight, params.canvasDepth));
+    activeProgram->setUniformValue("pointSize", params.pointSize);
 
-    // Effect enable/disable flags
-    shaderProgram->setUniformValue("enableSizeAttenuation", params.enableSizeAttenuation);
-    shaderProgram->setUniformValue("enableDepthFade", params.enableDepthFade);
-    shaderProgram->setUniformValue("enableBrightnessAttenuation", params.enableBrightnessAttenuation);
-    shaderProgram->setUniformValue("enableDOF", params.enableDOF);
+    // Set additional uniforms only for regular shader (Gaussian shader doesn't use these)
+    if (!gaussianSplattingEnabled) {
+        activeProgram->setUniformValue("sizeAttenuationFactor", params.sizeAttenuationFactor);
+        activeProgram->setUniformValue("depthFadeStart", params.depthFadeStart);
+        activeProgram->setUniformValue("depthFadeEnd", params.depthFadeEnd);
+        activeProgram->setUniformValue("brightnessMin", params.brightnessMin);
+        activeProgram->setUniformValue("focusDistance", params.focusDistance);
+        activeProgram->setUniformValue("apertureSize", params.apertureSize);
 
-    // Set particle colors
+        // Effect enable/disable flags
+        activeProgram->setUniformValue("enableSizeAttenuation", params.enableSizeAttenuation);
+        activeProgram->setUniformValue("enableDepthFade", params.enableDepthFade);
+        activeProgram->setUniformValue("enableBrightnessAttenuation", params.enableBrightnessAttenuation);
+        activeProgram->setUniformValue("enableDOF", params.enableDOF);
+    }
+
+    // Set particle colors (common to both shaders)
     for (int i = 0; i < params.numParticleTypes; ++i) {
         QString colorName = QString("particleColors[%1]").arg(i);
-        shaderProgram->setUniformValue(colorName.toStdString().c_str(), 
+        activeProgram->setUniformValue(colorName.toStdString().c_str(),
             QVector3D(particleColors[i].r, particleColors[i].g, particleColors[i].b));
     }
     
@@ -461,9 +565,9 @@ void CellFlowWidget::paintGL() {
     // Draw particles as points
     int particleCount = particleData.size();
     glDrawArrays(GL_POINTS, 0, particleCount);
-    
+
     vao.release();
-    shaderProgram->release();
+    activeProgram->release();
     
     err = glGetError();
     if (err != GL_NO_ERROR) {
@@ -566,6 +670,28 @@ void CellFlowWidget::generateParticleColors() {
         
         particleColors.push_back({r + m, g + m, b + m});
     }
+}
+
+void CellFlowWidget::sortParticlesByDepth() {
+    // Sort particles back-to-front for proper alpha blending
+    // Calculate camera position from orbital parameters
+    float radX = cameraRotationX * M_PI / 180.0f;
+    float radY = cameraRotationY * M_PI / 180.0f;
+    float camPosX = cameraTargetX + cameraDistance * cos(radX) * sin(radY);
+    float camPosY = cameraTargetY + cameraDistance * sin(radX);
+    float camPosZ = cameraTargetZ + cameraDistance * cos(radX) * cos(radY);
+
+    // Sort by distance from camera (farthest first for back-to-front rendering)
+    std::sort(particleData.begin(), particleData.end(),
+        [camPosX, camPosY, camPosZ](const Particle& a, const Particle& b) {
+            float distA = (a.pos.x - camPosX) * (a.pos.x - camPosX) +
+                          (a.pos.y - camPosY) * (a.pos.y - camPosY) +
+                          (a.pos.z - camPosZ) * (a.pos.z - camPosZ);
+            float distB = (b.pos.x - camPosX) * (b.pos.x - camPosX) +
+                          (b.pos.y - camPosY) * (b.pos.y - camPosY) +
+                          (b.pos.z - camPosZ) * (b.pos.z - camPosZ);
+            return distA > distB;  // Sort farthest first
+        });
 }
 
 void CellFlowWidget::cleanupEffectResources() {
@@ -756,6 +882,11 @@ void CellFlowWidget::setInvertRotation(bool inverted) {
 
 void CellFlowWidget::setFrameRateCap(int capFps) {
     frameRateCap = capFps;
+}
+
+void CellFlowWidget::setGaussianSplatting(bool enabled) {
+    gaussianSplattingEnabled = enabled;
+    update();  // Force redraw with new rendering mode
 }
 
 

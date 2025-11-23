@@ -78,6 +78,9 @@ public:
     // Frame rate control
     void setFrameRateCap(int capFps);  // 0 = unlimited, 30, 60, etc.
 
+    // Gaussian splatting control
+    void setGaussianSplatting(bool enabled);
+
     // Get current parameters
     const SimulationParams& getParams() const { return params; }
     int getParticleCount() const;
@@ -110,11 +113,13 @@ private slots:
 private:
     void initializeShaders();
     void initializeEffectShaders();
+    void initializeGaussianShaders();
     void initializeQuadBuffer();
     void updateParticleBuffer();
     void generateParticleColors();
     void renderWithEffects();
     void cleanupEffectResources();
+    void sortParticlesByDepth();
     
     std::unique_ptr<ParticleSimulation> simulation;
     SimulationParams params;
@@ -122,6 +127,7 @@ private:
     // OpenGL resources
     QOpenGLShaderProgram* shaderProgram;
     QOpenGLShaderProgram* effectProgram;
+    QOpenGLShaderProgram* gaussianProgram;
     QOpenGLBuffer particleBuffer;
     QOpenGLVertexArrayObject vao;
     
@@ -148,6 +154,7 @@ private:
 
     // Effect settings
     int currentEffectType;
+    bool gaussianSplattingEnabled;
 
     // 3D Camera parameters
     float cameraDistance;
