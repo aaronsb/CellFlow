@@ -26,6 +26,7 @@ public:
     // Simulation control
     void setParticleCount(int count);
     void setNumParticleTypes(int types);
+    void setUniverseSize(float size);
     void regenerateForces();
     void resetSimulation();
     void rotateRadioByType();
@@ -52,7 +53,31 @@ public:
     void setForceOffset(float value);
     void setPointSize(float value);
     void setEffectType(int type);
-    
+
+    // Depth effect setters
+    void setDepthFadeStart(float value);
+    void setDepthFadeEnd(float value);
+    void setSizeAttenuationFactor(float value);
+    void setBrightnessMin(float value);
+
+    // Depth-of-field setters
+    void setFocusDistance(float value);
+    void setApertureSize(float value);
+
+    // Effect enable/disable setters
+    void setEnableDepthFade(bool enabled);
+    void setEnableSizeAttenuation(bool enabled);
+    void setEnableBrightnessAttenuation(bool enabled);
+    void setEnableDOF(bool enabled);
+
+    // Camera navigation setters
+    void setInvertPan(bool inverted);
+    void setInvertForwardBack(bool inverted);
+    void setInvertRotation(bool inverted);
+
+    // Frame rate control
+    void setFrameRateCap(int capFps);  // 0 = unlimited, 30, 60, etc.
+
     // Get current parameters
     const SimulationParams& getParams() const { return params; }
     int getParticleCount() const;
@@ -72,8 +97,12 @@ protected:
     void initializeGL() override;
     void resizeGL(int w, int h) override;
     void paintGL() override;
-    
+
     void keyPressEvent(QKeyEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void wheelEvent(QWheelEvent* event) override;
 
 private slots:
     void updateSimulation();
@@ -116,9 +145,32 @@ private:
     // Window dimensions
     int windowWidth;
     int windowHeight;
-    
+
     // Effect settings
     int currentEffectType;
+
+    // 3D Camera parameters
+    float cameraDistance;
+    float cameraRotationX;
+    float cameraRotationY;
+    float cameraPosX;
+    float cameraPosY;
+    float cameraPosZ;
+    float cameraTargetX;
+    float cameraTargetY;
+    float cameraTargetZ;
+
+    // Mouse interaction for orbital camera
+    bool isLeftMousePressed;
+    bool isRightMousePressed;
+    QPoint lastMousePos;
+    bool invertPan;
+    bool invertForwardBack;
+    bool invertRotation;
+
+    // Frame rate limiting
+    int frameRateCap;          // 0 = unlimited, 30, 60, etc.
+    qint64 lastFrameTime;      // Time of last rendered frame
 };
 
 #endif // CELLFLOW_WIDGET_H

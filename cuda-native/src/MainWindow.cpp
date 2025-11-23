@@ -120,7 +120,16 @@ void MainWindow::setupUI() {
     connect(particleCountEdit, &QLineEdit::returnPressed,
             this, &MainWindow::onParticleCountConfirmed);
     particleLayout->addWidget(particleCountEdit, 0, 1);
-    
+
+    particleLayout->addWidget(new QLabel("Universe:"), 0, 2);
+    universeSizeEdit = new QLineEdit(this);
+    universeSizeEdit->setText("8000");
+    universeSizeEdit->setValidator(new QIntValidator(1000, 50000, this));
+    universeSizeEdit->setMaximumWidth(100);
+    connect(universeSizeEdit, &QLineEdit::returnPressed,
+            this, &MainWindow::onUniverseSizeConfirmed);
+    particleLayout->addWidget(universeSizeEdit, 0, 3);
+
     particleLayout->addWidget(new QLabel("Types:"), 1, 0);
     particleTypesSpinBox = new QSpinBox(this);
     particleTypesSpinBox->setRange(2, 10);
@@ -136,12 +145,12 @@ void MainWindow::setupUI() {
     QGroupBox* physicsGroup = new QGroupBox("Physics Parameters", this);
     QVBoxLayout* physicsLayout = new QVBoxLayout(physicsGroup);
     
-    physicsLayout->addWidget(createControlGroup("Radius", radiusSlider, radiusEdit, 10, 125, 50.0));
-    physicsLayout->addWidget(createControlGroup("Time", deltaTSlider, deltaTEdit, 0.01, 0.35, 0.22));
-    physicsLayout->addWidget(createControlGroup("Friction", frictionSlider, frictionEdit, 0.0, 1.0, 0.71));
-    physicsLayout->addWidget(createControlGroup("Repulsion", repulsionSlider, repulsionEdit, 2.0, 200.0, 50.0));
-    physicsLayout->addWidget(createControlGroup("Attraction", attractionSlider, attractionEdit, 0.1, 4.0, 0.62));
-    physicsLayout->addWidget(createControlGroup("K", kSlider, kEdit, 1.5, 30.0, 16.57));
+    physicsLayout->addWidget(createControlGroup("Radius", radiusSlider, radiusEdit, 10, 125, 42.07));
+    physicsLayout->addWidget(createControlGroup("Time", deltaTSlider, deltaTEdit, 0.01, 0.35, 0.18));
+    physicsLayout->addWidget(createControlGroup("Friction", frictionSlider, frictionEdit, 0.0, 1.0, 0.51));
+    physicsLayout->addWidget(createControlGroup("Repulsion", repulsionSlider, repulsionEdit, 2.0, 200.0, 64.83));
+    physicsLayout->addWidget(createControlGroup("Attraction", attractionSlider, attractionEdit, 0.1, 4.0, 3.06));
+    physicsLayout->addWidget(createControlGroup("K", kSlider, kEdit, 1.5, 45.0, 29.45));
     
     controlLayout->addWidget(physicsGroup);
     
@@ -160,9 +169,51 @@ void MainWindow::setupUI() {
     // Rendering parameters
     QGroupBox* renderGroup = new QGroupBox("Rendering", this);
     QVBoxLayout* renderLayout = new QVBoxLayout(renderGroup);
-    
-    renderLayout->addWidget(createControlGroup("Point Size", pointSizeSlider, pointSizeEdit, 1.0, 10.0, 4.0, 0.5));
-    
+
+    renderLayout->addWidget(createControlGroup("Point Size", pointSizeSlider, pointSizeEdit, 1.0, 30.0, 10.0, 0.5));
+
+    // Depth effect parameters
+    renderLayout->addWidget(createControlGroup("Fade Start", depthFadeStartSlider, depthFadeStartEdit, 100.0, 3000.0, 1000.0, 100.0));
+    renderLayout->addWidget(createControlGroup("Fade End", depthFadeEndSlider, depthFadeEndEdit, 500.0, 5000.0, 2500.0, 100.0));
+    renderLayout->addWidget(createControlGroup("Size Atten", sizeAttenuationSlider, sizeAttenuationEdit, 100.0, 3000.0, 1000.0, 100.0));
+    renderLayout->addWidget(createControlGroup("Bright Min", brightnessMinSlider, brightnessMinEdit, 0.0, 1.0, 0.4, 0.1));
+
+    // Depth-of-field parameters
+    renderLayout->addWidget(createControlGroup("Focus Dist", focusDistanceSlider, focusDistanceEdit, 500.0, 8000.0, 3000.0, 100.0));
+    renderLayout->addWidget(createControlGroup("Aperture", apertureSizeSlider, apertureSizeEdit, 0.0, 5.0, 0.0, 0.1));
+
+    // Effect enable/disable checkboxes
+    QWidget* effectTogglesWidget = new QWidget(this);
+    QGridLayout* togglesLayout = new QGridLayout(effectTogglesWidget);
+    togglesLayout->setContentsMargins(0, 10, 0, 0);
+
+    enableDepthFadeCheckbox = new QCheckBox("Depth Fade", this);
+    enableDepthFadeCheckbox->setChecked(false);
+    connect(enableDepthFadeCheckbox, &QCheckBox::toggled,
+            [this](bool checked) { cellFlowWidget->setEnableDepthFade(checked); });
+
+    enableSizeAttenuationCheckbox = new QCheckBox("Size Atten", this);
+    enableSizeAttenuationCheckbox->setChecked(true);
+    connect(enableSizeAttenuationCheckbox, &QCheckBox::toggled,
+            [this](bool checked) { cellFlowWidget->setEnableSizeAttenuation(checked); });
+
+    enableBrightnessAttenuationCheckbox = new QCheckBox("Brightness", this);
+    enableBrightnessAttenuationCheckbox->setChecked(true);
+    connect(enableBrightnessAttenuationCheckbox, &QCheckBox::toggled,
+            [this](bool checked) { cellFlowWidget->setEnableBrightnessAttenuation(checked); });
+
+    enableDOFCheckbox = new QCheckBox("DOF", this);
+    enableDOFCheckbox->setChecked(false);
+    connect(enableDOFCheckbox, &QCheckBox::toggled,
+            [this](bool checked) { cellFlowWidget->setEnableDOF(checked); });
+
+    togglesLayout->addWidget(enableDepthFadeCheckbox, 0, 0);
+    togglesLayout->addWidget(enableSizeAttenuationCheckbox, 0, 1);
+    togglesLayout->addWidget(enableBrightnessAttenuationCheckbox, 1, 0);
+    togglesLayout->addWidget(enableDOFCheckbox, 1, 1);
+
+    renderLayout->addWidget(effectTogglesWidget);
+
     // Add effect selector
     QHBoxLayout* effectLayout = new QHBoxLayout();
     QLabel* effectLabel = new QLabel("Effect:", this);
@@ -179,7 +230,49 @@ void MainWindow::setupUI() {
     renderLayout->addLayout(effectLayout);
     
     controlLayout->addWidget(renderGroup);
-    
+
+    // 3D Navigation
+    QGroupBox* navGroup = new QGroupBox("3D Nav", this);
+    QVBoxLayout* navLayout = new QVBoxLayout(navGroup);
+
+    QCheckBox* invertPanCheckbox = new QCheckBox("Invert Pan", this);
+    invertPanCheckbox->setChecked(true);  // Pan inverted by default
+    connect(invertPanCheckbox, &QCheckBox::toggled,
+            [this](bool checked) { cellFlowWidget->setInvertPan(checked); });
+    navLayout->addWidget(invertPanCheckbox);
+
+    QCheckBox* invertForwardBackCheckbox = new QCheckBox("Invert Forward/Back", this);
+    invertForwardBackCheckbox->setChecked(false);
+    connect(invertForwardBackCheckbox, &QCheckBox::toggled,
+            [this](bool checked) { cellFlowWidget->setInvertForwardBack(checked); });
+    navLayout->addWidget(invertForwardBackCheckbox);
+
+    QCheckBox* invertRotationCheckbox = new QCheckBox("Invert Rotation", this);
+    invertRotationCheckbox->setChecked(false);
+    connect(invertRotationCheckbox, &QCheckBox::toggled,
+            [this](bool checked) { cellFlowWidget->setInvertRotation(checked); });
+    navLayout->addWidget(invertRotationCheckbox);
+
+    // Frame rate cap selector
+    QHBoxLayout* frameCapLayout = new QHBoxLayout();
+    QLabel* frameCapLabel = new QLabel("FPS Cap:", this);
+    QComboBox* frameCapComboBox = new QComboBox(this);
+    frameCapComboBox->addItem("Unlimited", 0);
+    frameCapComboBox->addItem("60 FPS", 60);
+    frameCapComboBox->addItem("30 FPS", 30);
+    frameCapComboBox->setCurrentIndex(0);  // Unlimited by default
+    connect(frameCapComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            [this, frameCapComboBox](int index) {
+                int capValue = frameCapComboBox->itemData(index).toInt();
+                cellFlowWidget->setFrameRateCap(capValue);
+            });
+    frameCapLayout->addWidget(frameCapLabel);
+    frameCapLayout->addWidget(frameCapComboBox);
+    frameCapLayout->addStretch();
+    navLayout->addLayout(frameCapLayout);
+
+    controlLayout->addWidget(navGroup);
+
     // Adaptive parameters
     QGroupBox* adaptiveGroup = new QGroupBox("Adaptive Parameters", this);
     QVBoxLayout* adaptiveLayout = new QVBoxLayout(adaptiveGroup);
@@ -330,7 +423,13 @@ QWidget* MainWindow::createControlGroup(const QString& label, QSlider*& slider,
     else if (label == "LFOS") connect(slider, &QSlider::valueChanged, this, &MainWindow::onLfoSChanged);
     else if (label == "F_Offset") connect(slider, &QSlider::valueChanged, this, &MainWindow::onForceOffsetChanged);
     else if (label == "Point Size") connect(slider, &QSlider::valueChanged, this, &MainWindow::onPointSizeChanged);
-    
+    else if (label == "Fade Start") connect(slider, &QSlider::valueChanged, this, &MainWindow::onDepthFadeStartChanged);
+    else if (label == "Fade End") connect(slider, &QSlider::valueChanged, this, &MainWindow::onDepthFadeEndChanged);
+    else if (label == "Size Atten") connect(slider, &QSlider::valueChanged, this, &MainWindow::onSizeAttenuationChanged);
+    else if (label == "Bright Min") connect(slider, &QSlider::valueChanged, this, &MainWindow::onBrightnessMinChanged);
+    else if (label == "Focus Dist") connect(slider, &QSlider::valueChanged, this, &MainWindow::onFocusDistanceChanged);
+    else if (label == "Aperture") connect(slider, &QSlider::valueChanged, this, &MainWindow::onApertureSizeChanged);
+
     return widget;
 }
 
@@ -360,6 +459,14 @@ void MainWindow::onParticleCountConfirmed() {
         cellFlowWidget->setParticleCount(value);
         cellFlowWidget->regenerateForces();  // Regenerate after confirming count
         updateParticleTypeTable();
+    }
+}
+
+void MainWindow::onUniverseSizeConfirmed() {
+    bool ok;
+    int value = universeSizeEdit->text().toInt(&ok);
+    if (ok) {
+        cellFlowWidget->setUniverseSize(static_cast<float>(value));
     }
 }
 
@@ -440,8 +547,40 @@ void MainWindow::onForceOffsetChanged(int value) {
 }
 
 void MainWindow::onPointSizeChanged(int value) {
-    double v = 1.0 + value * 0.5;
+    double v = 1.0 + value * 0.5;  // Slider range accommodates 1.0-30.0
     cellFlowWidget->setPointSize(v);
+}
+
+// Depth effect slots
+void MainWindow::onDepthFadeStartChanged(int value) {
+    double v = 100.0 + value * 100.0;
+    cellFlowWidget->setDepthFadeStart(v);
+}
+
+void MainWindow::onDepthFadeEndChanged(int value) {
+    double v = 500.0 + value * 100.0;
+    cellFlowWidget->setDepthFadeEnd(v);
+}
+
+void MainWindow::onSizeAttenuationChanged(int value) {
+    double v = 100.0 + value * 100.0;
+    cellFlowWidget->setSizeAttenuationFactor(v);
+}
+
+void MainWindow::onBrightnessMinChanged(int value) {
+    double v = value * 0.1;
+    cellFlowWidget->setBrightnessMin(v);
+}
+
+// DOF slots
+void MainWindow::onFocusDistanceChanged(int value) {
+    double v = 500.0 + value * 100.0;
+    cellFlowWidget->setFocusDistance(v);
+}
+
+void MainWindow::onApertureSizeChanged(int value) {
+    double v = value * 0.1;
+    cellFlowWidget->setApertureSize(v);
 }
 
 void MainWindow::onEffectChanged(int index) {
@@ -624,12 +763,16 @@ void MainWindow::onParticleColorChanged(int typeIndex, const QColor& newColor) {
 void MainWindow::setTooltipsEnabled(bool enabled) {
     // Particle controls
     if (particleCountEdit) {
-        particleCountEdit->setToolTip(enabled ? 
-            "Total number of particles (500-10000)\nHigher counts create denser patterns but require more GPU resources" : "");
+        particleCountEdit->setToolTip(enabled ?
+            "Total number of particles (500-100000)\nHigher counts create denser patterns but require more GPU resources" : "");
+    }
+    if (universeSizeEdit) {
+        universeSizeEdit->setToolTip(enabled ?
+            "Universe size (1000-50000)\nSize of the toroidal 3D space\nLarger = less wraparound, smaller = more compact" : "");
     }
     if (particleTypesSpinBox) {
-        particleTypesSpinBox->setToolTip(enabled ? 
-            "Number of distinct particle types (2-6)\nEach type has unique colors and force relationships" : "");
+        particleTypesSpinBox->setToolTip(enabled ?
+            "Number of distinct particle types (2-10)\nEach type has unique colors and force relationships" : "");
     }
     
     // Physics sliders

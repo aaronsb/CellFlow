@@ -26,27 +26,41 @@ __global__ void initCurandKernel(curandState* states, int count, unsigned long s
 
 // Initialize particles kernel
 __global__ void initializeParticlesKernel(
-    Particle* particles, 
-    int particleCount, 
+    Particle* particles,
+    int particleCount,
     int numTypes,
-    float canvasWidth, 
+    float canvasWidth,
     float canvasHeight,
+    float canvasDepth,
+    float spawnRegionSize,
     curandState* states
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= particleCount) return;
-    
+
     curandState localState = states[idx];
-    
-    particles[idx].pos.x = curand_uniform(&localState) * canvasWidth;
-    particles[idx].pos.y = curand_uniform(&localState) * canvasHeight;
+
+    // Spawn in central region, centered in the universe
+    float spawnWidth = fminf(spawnRegionSize, canvasWidth);
+    float spawnHeight = fminf(spawnRegionSize, canvasHeight);
+    float spawnDepth = fminf(spawnRegionSize, canvasDepth);
+
+    float offsetX = (canvasWidth - spawnWidth) * 0.5f;
+    float offsetY = (canvasHeight - spawnHeight) * 0.5f;
+    float offsetZ = (canvasDepth - spawnDepth) * 0.5f;
+
+    particles[idx].pos.x = offsetX + curand_uniform(&localState) * spawnWidth;
+    particles[idx].pos.y = offsetY + curand_uniform(&localState) * spawnHeight;
+    particles[idx].pos.z = offsetZ + curand_uniform(&localState) * spawnDepth;
     particles[idx].vel.x = 0.0f;
     particles[idx].vel.y = 0.0f;
+    particles[idx].vel.z = 0.0f;
     particles[idx].acc.x = 0.0f;
     particles[idx].acc.y = 0.0f;
+    particles[idx].acc.z = 0.0f;
     particles[idx].ptype = (unsigned int)(curand_uniform(&localState) * numTypes);
-    particles[idx].pad = 0;
-    
+    particles[idx].pad = 0.0f;
+
     states[idx] = localState;
 }
 
@@ -64,26 +78,29 @@ __global__ void simulateParticlesKernel(
     if (idx >= particleCount) return;
     
     Particle p = particles[idx];
-    float2 totalForce = make_float2(0.0f, 0.0f);
+    float3 totalForce = make_float3(0.0f, 0.0f, 0.0f);
     int neighborCount = 0;
-    
+
     // Calculate forces from all other particles
     for (int j = 0; j < particleCount; j++) {
         if (idx == j) continue;
-        
+
         Particle other = particles[j];
-        
-        // Calculate distance with wrapping
+
+        // Calculate distance with wrapping in 3D
         float dx = other.pos.x - p.pos.x;
         float dy = other.pos.y - p.pos.y;
-        
-        // Wrap around boundaries
+        float dz = other.pos.z - p.pos.z;
+
+        // Wrap around boundaries (toroidal space in 3D)
         if (dx > params.canvasWidth * 0.5f) dx -= params.canvasWidth;
         if (dx < -params.canvasWidth * 0.5f) dx += params.canvasWidth;
         if (dy > params.canvasHeight * 0.5f) dy -= params.canvasHeight;
         if (dy < -params.canvasHeight * 0.5f) dy += params.canvasHeight;
-        
-        float distSq = dx * dx + dy * dy;
+        if (dz > params.canvasDepth * 0.5f) dz -= params.canvasDepth;
+        if (dz < -params.canvasDepth * 0.5f) dz += params.canvasDepth;
+
+        float distSq = dx * dx + dy * dy + dz * dz;
         float dist = sqrtf(distSq + 0.0001f); // Avoid division by zero
         
         // Calculate effective radius
@@ -105,11 +122,12 @@ __global__ void simulateParticlesKernel(
             
             // Apply force value from table
             netForce *= forceValue;
-            
-            // Apply force in direction of other particle
-            float2 forceDir = make_float2(dx / dist, dy / dist);
+
+            // Apply force in direction of other particle (3D)
+            float3 forceDir = make_float3(dx / dist, dy / dist, dz / dist);
             totalForce.x += forceDir.x * netForce;
             totalForce.y += forceDir.y * netForce;
+            totalForce.z += forceDir.z * netForce;
         }
     }
     
@@ -121,21 +139,25 @@ __global__ void simulateParticlesKernel(
     
     totalForce.x *= params.forceMultiplier * adaptiveForceFactor;
     totalForce.y *= params.forceMultiplier * adaptiveForceFactor;
-    
+    totalForce.z *= params.forceMultiplier * adaptiveForceFactor;
+
     // Update acceleration
     p.acc = totalForce;
-    
-    // Update velocity with friction
+
+    // Update velocity with friction (3D)
     p.vel.x = p.vel.x * params.friction + p.acc.x * params.delta_t;
     p.vel.y = p.vel.y * params.friction + p.acc.y * params.delta_t;
-    
-    // Update position
+    p.vel.z = p.vel.z * params.friction + p.acc.z * params.delta_t;
+
+    // Update position (3D)
     p.pos.x += p.vel.x * params.delta_t;
     p.pos.y += p.vel.y * params.delta_t;
-    
-    // Wrap position
+    p.pos.z += p.vel.z * params.delta_t;
+
+    // Wrap position (toroidal space in 3D)
     p.pos.x = fmodf(p.pos.x + params.canvasWidth, params.canvasWidth);
     p.pos.y = fmodf(p.pos.y + params.canvasHeight, params.canvasHeight);
+    p.pos.z = fmodf(p.pos.z + params.canvasDepth, params.canvasDepth);
     
     // Write back
     particles[idx] = p;
@@ -148,20 +170,23 @@ __global__ void moveParticlesKernel(
     int particleCount,
     float dx,
     float dy,
+    float dz,
     float canvasWidth,
-    float canvasHeight
+    float canvasHeight,
+    float canvasDepth
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= particleCount) return;
-    
+
     particles[idx].pos.x = fmodf(particles[idx].pos.x + dx + canvasWidth, canvasWidth);
     particles[idx].pos.y = fmodf(particles[idx].pos.y + dy + canvasHeight, canvasHeight);
+    particles[idx].pos.z = fmodf(particles[idx].pos.z + dz + canvasDepth, canvasDepth);
 }
 
 // ParticleSimulation implementation
-ParticleSimulation::ParticleSimulation(int particleCount) 
+ParticleSimulation::ParticleSimulation(int particleCount)
     : particleCount(particleCount), numParticleTypes(6), useBufferAasInput(true),
-      currentCanvasWidth(1920.0f), currentCanvasHeight(1080.0f) {
+      currentCanvasWidth(8000.0f), currentCanvasHeight(8000.0f), currentCanvasDepth(8000.0f) {
     allocateMemory();
     initializeCurand();
     initializeParticles();
@@ -169,9 +194,9 @@ ParticleSimulation::ParticleSimulation(int particleCount)
     initializeRadioByType();
 }
 
-ParticleSimulation::ParticleSimulation(int particleCount, float canvasWidth, float canvasHeight) 
+ParticleSimulation::ParticleSimulation(int particleCount, float canvasWidth, float canvasHeight)
     : particleCount(particleCount), numParticleTypes(6), useBufferAasInput(true),
-      currentCanvasWidth(canvasWidth), currentCanvasHeight(canvasHeight) {
+      currentCanvasWidth(canvasWidth), currentCanvasHeight(canvasHeight), currentCanvasDepth(canvasHeight) {
     allocateMemory();
     initializeCurand();
     initializeParticles();
@@ -219,8 +244,9 @@ void ParticleSimulation::initializeCurand() {
 void ParticleSimulation::initializeParticles() {
     int blocks = (particleCount + BLOCK_SIZE - 1) / BLOCK_SIZE;
     initializeParticlesKernel<<<blocks, BLOCK_SIZE>>>(
-        d_particles, particleCount, numParticleTypes, 
-        currentCanvasWidth, currentCanvasHeight, d_randStates
+        d_particles, particleCount, numParticleTypes,
+        currentCanvasWidth, currentCanvasHeight, currentCanvasDepth,
+        2000.0f, d_randStates  // Use 2000x2000x2000 spawn region
     );
     CUDA_CHECK(cudaDeviceSynchronize());
 }
@@ -228,10 +254,12 @@ void ParticleSimulation::initializeParticles() {
 void ParticleSimulation::initializeParticles(float canvasWidth, float canvasHeight) {
     currentCanvasWidth = canvasWidth;
     currentCanvasHeight = canvasHeight;
+    currentCanvasDepth = canvasHeight;  // Default depth to height
     int blocks = (particleCount + BLOCK_SIZE - 1) / BLOCK_SIZE;
     initializeParticlesKernel<<<blocks, BLOCK_SIZE>>>(
-        d_particles, particleCount, numParticleTypes, 
-        canvasWidth, canvasHeight, d_randStates
+        d_particles, particleCount, numParticleTypes,
+        canvasWidth, canvasHeight, currentCanvasDepth,
+        2000.0f, d_randStates  // Use 2000x2000x2000 spawn region
     );
     CUDA_CHECK(cudaDeviceSynchronize());
 }
@@ -239,6 +267,7 @@ void ParticleSimulation::initializeParticles(float canvasWidth, float canvasHeig
 void ParticleSimulation::updateCanvasDimensions(float canvasWidth, float canvasHeight) {
     currentCanvasWidth = canvasWidth;
     currentCanvasHeight = canvasHeight;
+    currentCanvasDepth = canvasHeight;  // Default depth to height
 }
 
 void ParticleSimulation::initializeForceTable() {
@@ -317,7 +346,7 @@ void ParticleSimulation::moveUniverse(float dx, float dy) {
     SimulationParams params;
     int blocks = (particleCount + BLOCK_SIZE - 1) / BLOCK_SIZE;
     moveParticlesKernel<<<blocks, BLOCK_SIZE>>>(
-        d_particles, particleCount, dx, dy, params.canvasWidth, params.canvasHeight
+        d_particles, particleCount, dx, dy, 0.0f, params.canvasWidth, params.canvasHeight, params.canvasDepth
     );
     CUDA_CHECK(cudaDeviceSynchronize());
 }
