@@ -392,6 +392,35 @@ __global__ void generateTriangleMeshKernel(
                 nz /= length;
             }
 
+            // Calculate triangle centroid for smooth normal approximation
+            float cx = (v1.pos.x + v2.pos.x + v3.pos.x) / 3.0f;
+            float cy = (v1.pos.y + v2.pos.y + v3.pos.y) / 3.0f;
+            float cz = (v1.pos.z + v2.pos.z + v3.pos.z) / 3.0f;
+
+            // Compute per-vertex normals (blend face normal with inward direction for smooth shading)
+            float blend = 0.3f;  // 30% face normal, 70% vertex-specific
+
+            // Vertex 1 normal
+            float n1x = nx * blend + (cx - v1.pos.x) * (1.0f - blend);
+            float n1y = ny * blend + (cy - v1.pos.y) * (1.0f - blend);
+            float n1z = nz * blend + (cz - v1.pos.z) * (1.0f - blend);
+            float len1 = sqrtf(n1x*n1x + n1y*n1y + n1z*n1z);
+            if (len1 > 0.0001f) { n1x /= len1; n1y /= len1; n1z /= len1; }
+
+            // Vertex 2 normal
+            float n2x = nx * blend + (cx - v2.pos.x) * (1.0f - blend);
+            float n2y = ny * blend + (cy - v2.pos.y) * (1.0f - blend);
+            float n2z = nz * blend + (cz - v2.pos.z) * (1.0f - blend);
+            float len2 = sqrtf(n2x*n2x + n2y*n2y + n2z*n2z);
+            if (len2 > 0.0001f) { n2x /= len2; n2y /= len2; n2z /= len2; }
+
+            // Vertex 3 normal
+            float n3x = nx * blend + (cx - v3.pos.x) * (1.0f - blend);
+            float n3y = ny * blend + (cy - v3.pos.y) * (1.0f - blend);
+            float n3z = nz * blend + (cz - v3.pos.z) * (1.0f - blend);
+            float len3 = sqrtf(n3x*n3x + n3y*n3y + n3z*n3z);
+            if (len3 > 0.0001f) { n3x /= len3; n3y /= len3; n3z /= len3; }
+
             // Write 3 vertices (each vertex: position + normal + color = 9 floats)
             int baseIdx = (writeOffset + t * 3) * 9;
 
@@ -399,9 +428,9 @@ __global__ void generateTriangleMeshKernel(
             triangleVertices[baseIdx + 0] = v1.pos.x;
             triangleVertices[baseIdx + 1] = v1.pos.y;
             triangleVertices[baseIdx + 2] = v1.pos.z;
-            triangleVertices[baseIdx + 3] = nx;
-            triangleVertices[baseIdx + 4] = ny;
-            triangleVertices[baseIdx + 5] = nz;
+            triangleVertices[baseIdx + 3] = n1x;
+            triangleVertices[baseIdx + 4] = n1y;
+            triangleVertices[baseIdx + 5] = n1z;
             triangleVertices[baseIdx + 6] = color.r;
             triangleVertices[baseIdx + 7] = color.g;
             triangleVertices[baseIdx + 8] = color.b;
@@ -410,9 +439,9 @@ __global__ void generateTriangleMeshKernel(
             triangleVertices[baseIdx + 9] = v2.pos.x;
             triangleVertices[baseIdx + 10] = v2.pos.y;
             triangleVertices[baseIdx + 11] = v2.pos.z;
-            triangleVertices[baseIdx + 12] = nx;
-            triangleVertices[baseIdx + 13] = ny;
-            triangleVertices[baseIdx + 14] = nz;
+            triangleVertices[baseIdx + 12] = n2x;
+            triangleVertices[baseIdx + 13] = n2y;
+            triangleVertices[baseIdx + 14] = n2z;
             triangleVertices[baseIdx + 15] = color.r;
             triangleVertices[baseIdx + 16] = color.g;
             triangleVertices[baseIdx + 17] = color.b;
@@ -421,9 +450,9 @@ __global__ void generateTriangleMeshKernel(
             triangleVertices[baseIdx + 18] = v3.pos.x;
             triangleVertices[baseIdx + 19] = v3.pos.y;
             triangleVertices[baseIdx + 20] = v3.pos.z;
-            triangleVertices[baseIdx + 21] = nx;
-            triangleVertices[baseIdx + 22] = ny;
-            triangleVertices[baseIdx + 23] = nz;
+            triangleVertices[baseIdx + 21] = n3x;
+            triangleVertices[baseIdx + 22] = n3y;
+            triangleVertices[baseIdx + 23] = n3z;
             triangleVertices[baseIdx + 24] = color.r;
             triangleVertices[baseIdx + 25] = color.g;
             triangleVertices[baseIdx + 26] = color.b;
