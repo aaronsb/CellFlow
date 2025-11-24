@@ -78,13 +78,11 @@ public:
     // Frame rate control
     void setFrameRateCap(int capFps);  // 0 = unlimited, 30, 60, etc.
 
-    // Proximity graph (vertex connections between nearby particles)
+    // Proximity graph radiance field (connections emit soft radiance)
     void setEnableProximityGraph(bool enabled);
     void setProximityDistance(float distance);
     void setMaxConnectionsPerParticle(int maxConnections);
-
-    // Triangle mesh (surface rendering from proximity graph)
-    void setEnableTriangleMesh(bool enabled);
+    void setRadianceIntensity(float intensity);
 
     // Get current parameters
     const SimulationParams& getParams() const { return params; }
@@ -165,12 +163,7 @@ private:
     bool enableProximityGraph;
     float proximityDistance;
     int maxConnectionsPerParticle;
-
-    // Triangle mesh rendering (GPU-based with CUDA-OpenGL interop)
-    QOpenGLShaderProgram* triangleShaderProgram;
-    QOpenGLBuffer triangleBuffer;
-    QOpenGLVertexArrayObject triangleVAO;
-    bool enableTriangleMesh;
+    float radianceIntensity;
 
     // 3D Camera parameters
     float cameraDistance;

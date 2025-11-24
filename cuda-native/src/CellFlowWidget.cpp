@@ -12,10 +12,10 @@ CellFlowWidget::CellFlowWidget(QWidget* parent)
     : QOpenGLWidget(parent),
       simulation(std::make_unique<ParticleSimulation>(4000)),
       frameCount(0), currentFPS(0.0), lastFPSUpdate(0),
-      shaderProgram(nullptr), effectProgram(nullptr), lineShaderProgram(nullptr), triangleShaderProgram(nullptr),
+      shaderProgram(nullptr), effectProgram(nullptr), lineShaderProgram(nullptr),
       particleTexture(0), effectFBO(nullptr), currentEffectType(0),
       enableProximityGraph(false), proximityDistance(200.0f), maxConnectionsPerParticle(5),
-      enableTriangleMesh(false),
+      radianceIntensity(0.5f),
       cameraDistance(3000.0f), cameraRotationX(30.0f), cameraRotationY(45.0f),
       cameraPosX(0.0f), cameraPosY(0.0f), cameraPosZ(0.0f),
       cameraTargetX(0.0f), cameraTargetY(0.0f), cameraTargetZ(0.0f),
@@ -51,12 +51,9 @@ CellFlowWidget::~CellFlowWidget() {
     quadVAO.destroy();
     lineBuffer.destroy();
     lineVAO.destroy();
-    triangleBuffer.destroy();
-    triangleVAO.destroy();
     delete shaderProgram;
     delete effectProgram;
     delete lineShaderProgram;
-    delete triangleShaderProgram;
     if (particleTexture != 0) {
         glDeleteTextures(1, &particleTexture);
     }
@@ -138,16 +135,19 @@ void CellFlowWidget::initializeGL() {
         in float depth;
         uniform float depthFadeStart;
         uniform float depthFadeEnd;
+        uniform float radianceIntensity;  // Controls brightness of radiance
         out vec4 fragColor;
         void main() {
-            // Depth fade: fade out distant lines
+            // Depth fade: fade out distant connections
             float fadeFactor = 1.0;
             if (depth > depthFadeStart) {
                 fadeFactor = 1.0 - smoothstep(depthFadeStart, depthFadeEnd, depth);
             }
 
-            float alpha = 0.3 * fadeFactor;  // Semi-transparent lines with depth fade
-            fragColor = vec4(lineColor, alpha);
+            // Radiance field: use additive blending with brighter colors
+            // More overlapping connections = brighter glow
+            float intensity = radianceIntensity * fadeFactor;
+            fragColor = vec4(lineColor * intensity, 1.0);
         }
     )";
 
@@ -158,81 +158,6 @@ void CellFlowWidget::initializeGL() {
         std::cerr << "Line shader linking failed: " << lineShaderProgram->log().toStdString() << std::endl;
     } else {
         std::cout << "Line shader linked successfully!" << std::endl;
-    }
-
-    // Initialize triangle mesh rendering (GPU-computed via CUDA)
-    triangleVAO.create();
-    triangleBuffer.create();
-    triangleBuffer.setUsagePattern(QOpenGLBuffer::DynamicDraw);
-
-    // Pre-allocate buffer for GPU writing via CUDA-OpenGL interop
-    // Each triangle: 3 vertices × 9 floats (pos + normal + color)
-    int maxTriangles = particleData.size() * 64;  // Max ~64 triangles per particle
-    int triangleBufferSize = maxTriangles * 3 * 9 * sizeof(float);
-    triangleBuffer.bind();
-    triangleBuffer.allocate(triangleBufferSize);
-    triangleBuffer.release();
-
-    // Create triangle mesh shader with flat shading and lighting
-    triangleShaderProgram = new QOpenGLShaderProgram(this);
-
-    const char* triangleVertexShader = R"(
-        #version 150 core
-        in vec3 position;
-        in vec3 normal;
-        in vec3 color;
-        uniform mat4 viewMatrix;
-        uniform mat4 projMatrix;
-        uniform vec3 canvasSize;
-        out vec3 fragNormal;
-        out vec3 fragColor;
-        out vec3 fragPos;
-        void main() {
-            vec3 centeredPos = position - canvasSize * 0.5;
-            vec4 viewPos = viewMatrix * vec4(centeredPos, 1.0);
-            gl_Position = projMatrix * viewPos;
-
-            // Transform normal to view space for lighting
-            fragNormal = mat3(viewMatrix) * normal;
-            fragColor = color;
-            fragPos = viewPos.xyz;
-        }
-    )";
-
-    const char* triangleFragmentShader = R"(
-        #version 150 core
-        in vec3 fragNormal;
-        in vec3 fragColor;
-        in vec3 fragPos;
-        out vec4 outColor;
-
-        void main() {
-            // Normalize the normal (flat shading - same for whole triangle)
-            vec3 N = normalize(fragNormal);
-
-            // Simple directional light from above-right
-            vec3 lightDir = normalize(vec3(0.5, 0.7, 0.3));
-
-            // Diffuse lighting
-            float diffuse = max(dot(N, lightDir), 0.0);
-
-            // Ambient light
-            float ambient = 0.3;
-
-            // Combine lighting (diffuse + ambient only, no specular for matte look)
-            vec3 lighting = fragColor * (ambient + diffuse);
-
-            outColor = vec4(lighting, 1.0);  // Opaque for solid surfaces
-        }
-    )";
-
-    triangleShaderProgram->addShaderFromSourceCode(QOpenGLShader::Vertex, triangleVertexShader);
-    triangleShaderProgram->addShaderFromSourceCode(QOpenGLShader::Fragment, triangleFragmentShader);
-
-    if (!triangleShaderProgram->link()) {
-        std::cerr << "Triangle shader linking failed: " << triangleShaderProgram->log().toStdString() << std::endl;
-    } else {
-        std::cout << "Triangle shader linked successfully!" << std::endl;
     }
 }
 
@@ -664,6 +589,7 @@ void CellFlowWidget::paintGL() {
         lineShaderProgram->setUniformValue("canvasSize", QVector3D(params.canvasWidth, params.canvasHeight, params.canvasDepth));
         lineShaderProgram->setUniformValue("depthFadeStart", params.depthFadeStart);
         lineShaderProgram->setUniformValue("depthFadeEnd", params.depthFadeEnd);
+        lineShaderProgram->setUniformValue("radianceIntensity", radianceIntensity);
 
         err = glGetError();
         if (err != GL_NO_ERROR) {
@@ -672,6 +598,11 @@ void CellFlowWidget::paintGL() {
 
         // Render directly from GPU-generated buffer
         if (gpuVertexCount > 0) {
+            // Enable additive blending for radiance field effect
+            // More overlapping connections = brighter accumulated glow
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_ONE, GL_ONE);  // Additive blending
+
             lineVAO.bind();
             lineBuffer.bind();
 
@@ -682,10 +613,13 @@ void CellFlowWidget::paintGL() {
             lineShaderProgram->enableAttributeArray(1);
             lineShaderProgram->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 3, 6 * sizeof(float));
 
-            // Draw lines
+            // Draw lines with radiance
             glDrawArrays(GL_LINES, 0, gpuVertexCount);
 
             lineVAO.release();
+
+            // Restore normal alpha blending
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         }
 
         err = glGetError();
@@ -694,74 +628,6 @@ void CellFlowWidget::paintGL() {
         }
 
         lineShaderProgram->release();
-    }
-
-    // Render triangle mesh (solid surface from proximity graph triangles) - GPU computed
-    if (enableTriangleMesh && triangleShaderProgram) {
-        // Ensure VBO is large enough for current particle count
-        int currentParticleCount = particleData.size();
-        int maxTriangles = currentParticleCount * 64;  // Estimate max triangles per particle
-        int requiredBufferSize = maxTriangles * 3 * 9 * sizeof(float);  // 3 verts × 9 floats
-
-        triangleBuffer.bind();
-        if (triangleBuffer.size() < requiredBufferSize) {
-            // Reallocate buffer if needed
-            triangleBuffer.allocate(requiredBufferSize);
-            std::cout << "Reallocated triangle mesh buffer for " << currentParticleCount
-                      << " particles (" << (requiredBufferSize / 1024 / 1024) << " MB)" << std::endl;
-        }
-        triangleBuffer.release();
-
-        // Use CUDA-OpenGL interop to generate triangle mesh entirely on GPU
-        int gpuVertexCount = 0;
-        simulation->generateTriangleMesh(
-            triangleBuffer.bufferId(),
-            gpuVertexCount,
-            proximityDistance,
-            maxConnectionsPerParticle,
-            particleColors
-        );
-
-        // Log periodically (every 5 seconds)
-        static qint64 lastTriLogTime = 0;
-        qint64 currentTime = frameTimer.elapsed();
-        if (currentTime - lastTriLogTime > 5000) {
-            std::cout << "Triangle mesh (GPU): " << (gpuVertexCount / 3) << " triangles" << std::endl;
-            lastTriLogTime = currentTime;
-        }
-
-        // Render triangles with lighting
-        if (gpuVertexCount > 0) {
-            triangleShaderProgram->bind();
-            triangleShaderProgram->setUniformValue("viewMatrix", viewMatrix);
-            triangleShaderProgram->setUniformValue("projMatrix", projMatrix);
-            triangleShaderProgram->setUniformValue("canvasSize", QVector3D(params.canvasWidth, params.canvasHeight, params.canvasDepth));
-
-            triangleVAO.bind();
-            triangleBuffer.bind();
-
-            // Set up vertex attributes (position + normal + color, 9 floats per vertex)
-            triangleShaderProgram->enableAttributeArray(0);  // position
-            triangleShaderProgram->setAttributeBuffer(0, GL_FLOAT, 0, 3, 9 * sizeof(float));
-
-            triangleShaderProgram->enableAttributeArray(1);  // normal
-            triangleShaderProgram->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 3, 9 * sizeof(float));
-
-            triangleShaderProgram->enableAttributeArray(2);  // color
-            triangleShaderProgram->setAttributeBuffer(2, GL_FLOAT, 6 * sizeof(float), 3, 9 * sizeof(float));
-
-            // Enable blending for semi-transparent triangles
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-            // Draw triangles (double-sided)
-            glDisable(GL_CULL_FACE);  // Render both front and back faces
-            glDrawArrays(GL_TRIANGLES, 0, gpuVertexCount);
-            glEnable(GL_CULL_FACE);
-
-            triangleVAO.release();
-            triangleShaderProgram->release();
-        }
     }
 
     // Wayland compositor fix: Clear alpha channel to prevent desktop showing through
@@ -1745,11 +1611,11 @@ void CellFlowWidget::setMaxConnectionsPerParticle(int maxConnections) {
     std::cout << "Max connections per particle set to: " << maxConnections << std::endl;
 }
 
-// Triangle mesh setter
-void CellFlowWidget::setEnableTriangleMesh(bool enabled) {
-    enableTriangleMesh = enabled;
-    std::cout << "Triangle mesh " << (enabled ? "enabled" : "disabled") << std::endl;
+void CellFlowWidget::setRadianceIntensity(float intensity) {
+    radianceIntensity = intensity;
+    std::cout << "Radiance intensity set to: " << intensity << std::endl;
 }
 
-// NOTE: Proximity graph and triangle mesh methods computed entirely on GPU using CUDA-OpenGL interop
-// See ParticleSimulation::generateProximityGraph() and generateTriangleMesh() in paintGL()
+// NOTE: Proximity graph radiance field computed entirely on GPU using CUDA-OpenGL interop
+// Connections emit soft radiance using additive blending for volumetric appearance
+// See ParticleSimulation::generateProximityGraph() in paintGL()
