@@ -12,9 +12,10 @@ CellFlowWidget::CellFlowWidget(QWidget* parent)
     : QOpenGLWidget(parent),
       simulation(std::make_unique<ParticleSimulation>(4000)),
       frameCount(0), currentFPS(0.0), lastFPSUpdate(0),
-      shaderProgram(nullptr), effectProgram(nullptr), lineShaderProgram(nullptr),
+      shaderProgram(nullptr), effectProgram(nullptr), lineShaderProgram(nullptr), triangleShaderProgram(nullptr),
       particleTexture(0), effectFBO(nullptr), currentEffectType(0),
       enableProximityGraph(false), proximityDistance(200.0f), maxConnectionsPerParticle(5),
+      enableTriangleMesh(false),
       cameraDistance(3000.0f), cameraRotationX(30.0f), cameraRotationY(45.0f),
       cameraPosX(0.0f), cameraPosY(0.0f), cameraPosZ(0.0f),
       cameraTargetX(0.0f), cameraTargetY(0.0f), cameraTargetZ(0.0f),
@@ -50,9 +51,12 @@ CellFlowWidget::~CellFlowWidget() {
     quadVAO.destroy();
     lineBuffer.destroy();
     lineVAO.destroy();
+    triangleBuffer.destroy();
+    triangleVAO.destroy();
     delete shaderProgram;
     delete effectProgram;
     delete lineShaderProgram;
+    delete triangleShaderProgram;
     if (particleTexture != 0) {
         glDeleteTextures(1, &particleTexture);
     }

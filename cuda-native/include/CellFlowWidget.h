@@ -83,6 +83,9 @@ public:
     void setProximityDistance(float distance);
     void setMaxConnectionsPerParticle(int maxConnections);
 
+    // Triangle mesh (surface rendering from proximity graph)
+    void setEnableTriangleMesh(bool enabled);
+
     // Get current parameters
     const SimulationParams& getParams() const { return params; }
     int getParticleCount() const;
@@ -162,6 +165,12 @@ private:
     bool enableProximityGraph;
     float proximityDistance;
     int maxConnectionsPerParticle;
+
+    // Triangle mesh rendering (GPU-based with CUDA-OpenGL interop)
+    QOpenGLShaderProgram* triangleShaderProgram;
+    QOpenGLBuffer triangleBuffer;
+    QOpenGLVertexArrayObject triangleVAO;
+    bool enableTriangleMesh;
 
     // 3D Camera parameters
     float cameraDistance;

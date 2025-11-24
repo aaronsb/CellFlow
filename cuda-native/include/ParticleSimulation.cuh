@@ -65,6 +65,15 @@ public:
         const std::vector<ParticleColor>& particleColors
     );
 
+    // Triangle mesh - Generate surface mesh from proximity graph triangles
+    void generateTriangleMesh(
+        unsigned int openglVBO,
+        int& outVertexCount,
+        float proximityDistance,
+        int maxConnectionsPerParticle,
+        const std::vector<ParticleColor>& particleColors
+    );
+
 private:
     int particleCount;
     int numParticleTypes;
@@ -134,6 +143,17 @@ __global__ void generateProximityGraphKernel(
     const ParticleColor* particleColors,
     int numParticleTypes,
     float* lineVertices,
+    int* vertexCount
+);
+
+__global__ void generateTriangleMeshKernel(
+    const Particle* particles,
+    int particleCount,
+    float proximityDistanceSq,
+    int maxConnectionsPerParticle,
+    const ParticleColor* particleColors,
+    int numParticleTypes,
+    float* triangleVertices,
     int* vertexCount
 );
 
