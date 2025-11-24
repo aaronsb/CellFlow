@@ -25,6 +25,18 @@ The CUDA implementation enables simulation of 50,000-100,000+ particles in real-
 - **Neighborhood-Based Physics**: Particles respond to local density with dynamic acceleration or friction
 - **Extended Balance Range**: Values beyond 1.0 create exotic behaviors including time-reversal effects and black hole-like structures
 
+## Visual Gallery
+
+### Proximity Graph Visualization
+GPU-accelerated connection lines reveal emergent community structures and particle interactions in real-time:
+
+![Proximity Graph - Community Detection](docs/media/2025-11-23_22-18.png)
+
+### Emergent Behaviors
+Complex predator-prey dynamics and cluster formations emerge from simple force rules:
+
+![Emergent Cluster Behaviors](docs/media/2025-11-23_22-58.png)
+
 ## Building and Running
 
 ### Requirements
