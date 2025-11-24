@@ -1,5 +1,6 @@
 #include "ParticleSimulation.cuh"
 #include <cuda_runtime.h>
+#include <cuda_gl_interop.h>
 #include <curand_kernel.h>
 #include <cmath>
 #include <cstring>
@@ -181,6 +182,98 @@ __global__ void moveParticlesKernel(
     particles[idx].pos.x = fmodf(particles[idx].pos.x + dx + canvasWidth, canvasWidth);
     particles[idx].pos.y = fmodf(particles[idx].pos.y + dy + canvasHeight, canvasHeight);
     particles[idx].pos.z = fmodf(particles[idx].pos.z + dz + canvasDepth, canvasDepth);
+}
+
+// Proximity graph generation kernel - writes line vertices directly to OpenGL VBO
+__global__ void generateProximityGraphKernel(
+    const Particle* particles,
+    int particleCount,
+    float proximityDistanceSq,
+    int maxConnectionsPerParticle,
+    const ParticleColor* particleColors,
+    int numParticleTypes,
+    float* lineVertices,
+    int* vertexCount
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= particleCount) return;
+
+    const Particle& p1 = particles[idx];
+
+    // Temp storage for nearby particles (distance, index)
+    struct NearbyParticle {
+        float distSq;
+        int index;
+    };
+
+    // Use shared memory or local array for sorting
+    NearbyParticle nearby[32];  // Max 32 to avoid too much local memory
+    int nearbyCount = 0;
+    int maxConn = min(maxConnectionsPerParticle, 32);
+
+    // Find nearby particles of same type
+    for (int j = idx + 1; j < particleCount && nearbyCount < maxConn * 2; j++) {
+        const Particle& p2 = particles[j];
+
+        // Only connect particles of same type
+        if (p1.ptype != p2.ptype) continue;
+
+        // Calculate distance squared
+        float dx = p2.pos.x - p1.pos.x;
+        float dy = p2.pos.y - p1.pos.y;
+        float dz = p2.pos.z - p1.pos.z;
+        float distSq = dx*dx + dy*dy + dz*dz;
+
+        if (distSq < proximityDistanceSq) {
+            nearby[nearbyCount].distSq = distSq;
+            nearby[nearbyCount].index = j;
+            nearbyCount++;
+        }
+    }
+
+    // Simple insertion sort to get closest particles
+    for (int i = 1; i < nearbyCount; i++) {
+        NearbyParticle key = nearby[i];
+        int j = i - 1;
+        while (j >= 0 && nearby[j].distSq > key.distSq) {
+            nearby[j + 1] = nearby[j];
+            j--;
+        }
+        nearby[j + 1] = key;
+    }
+
+    // Limit to maxConnectionsPerParticle
+    int connectionsToWrite = min(nearbyCount, maxConn);
+
+    if (connectionsToWrite > 0) {
+        // Atomically allocate space in output buffer
+        int writeOffset = atomicAdd(vertexCount, connectionsToWrite * 2);  // 2 vertices per line
+
+        // Get particle color
+        const ParticleColor& color = particleColors[p1.ptype % numParticleTypes];
+
+        // Write line vertices (each line needs 2 vertices with pos+color = 6 floats each)
+        for (int i = 0; i < connectionsToWrite; i++) {
+            const Particle& p2 = particles[nearby[i].index];
+            int baseIdx = (writeOffset + i * 2) * 6;  // 6 floats per vertex (pos + color)
+
+            // Vertex 1 (particle p1)
+            lineVertices[baseIdx + 0] = p1.pos.x;
+            lineVertices[baseIdx + 1] = p1.pos.y;
+            lineVertices[baseIdx + 2] = p1.pos.z;
+            lineVertices[baseIdx + 3] = color.r;
+            lineVertices[baseIdx + 4] = color.g;
+            lineVertices[baseIdx + 5] = color.b;
+
+            // Vertex 2 (particle p2)
+            lineVertices[baseIdx + 6] = p2.pos.x;
+            lineVertices[baseIdx + 7] = p2.pos.y;
+            lineVertices[baseIdx + 8] = p2.pos.z;
+            lineVertices[baseIdx + 9] = color.r;
+            lineVertices[baseIdx + 10] = color.g;
+            lineVertices[baseIdx + 11] = color.b;
+        }
+    }
 }
 
 // ParticleSimulation implementation
@@ -376,7 +469,72 @@ void ParticleSimulation::setRadioByTypeValue(int index, float value) {
     if (index >= 0 && index < numParticleTypes) {
         h_radioByType[index] = value;
         // Upload to device
-        CUDA_CHECK(cudaMemcpy(d_radioByType, h_radioByType.get(), 
+        CUDA_CHECK(cudaMemcpy(d_radioByType, h_radioByType.get(),
             numParticleTypes * sizeof(float), cudaMemcpyHostToDevice));
     }
+}
+
+// Proximity graph generation with CUDA-OpenGL interop
+void ParticleSimulation::generateProximityGraph(
+    unsigned int openglVBO,
+    int& outVertexCount,
+    float proximityDistance,
+    int maxConnectionsPerParticle,
+    const std::vector<ParticleColor>& particleColors
+) {
+    // Register OpenGL VBO with CUDA
+    cudaGraphicsResource* cudaVBOResource;
+    CUDA_CHECK(cudaGraphicsGLRegisterBuffer(&cudaVBOResource, openglVBO,
+        cudaGraphicsMapFlagsWriteDiscard));
+
+    // Map the buffer for CUDA writing
+    CUDA_CHECK(cudaGraphicsMapResources(1, &cudaVBOResource, 0));
+
+    float* d_lineVertices;
+    size_t numBytes;
+    CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&d_lineVertices,
+        &numBytes, cudaVBOResource));
+
+    // Allocate device memory for vertex count
+    int* d_vertexCount;
+    CUDA_CHECK(cudaMalloc(&d_vertexCount, sizeof(int)));
+    CUDA_CHECK(cudaMemset(d_vertexCount, 0, sizeof(int)));
+
+    // Copy particle colors to device
+    ParticleColor* d_particleColors;
+    CUDA_CHECK(cudaMalloc(&d_particleColors, particleColors.size() * sizeof(ParticleColor)));
+    CUDA_CHECK(cudaMemcpy(d_particleColors, particleColors.data(),
+        particleColors.size() * sizeof(ParticleColor), cudaMemcpyHostToDevice));
+
+    // Launch kernel
+    int blockSize = 256;
+    int gridSize = (particleCount + blockSize - 1) / blockSize;
+
+    float distSq = proximityDistance * proximityDistance;
+    generateProximityGraphKernel<<<gridSize, blockSize>>>(
+        d_particles,
+        particleCount,
+        distSq,
+        maxConnectionsPerParticle,
+        d_particleColors,
+        numParticleTypes,
+        d_lineVertices,
+        d_vertexCount
+    );
+
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    // Get vertex count
+    int h_vertexCount;
+    CUDA_CHECK(cudaMemcpy(&h_vertexCount, d_vertexCount, sizeof(int), cudaMemcpyDeviceToHost));
+    outVertexCount = h_vertexCount;
+
+    // Cleanup
+    CUDA_CHECK(cudaFree(d_vertexCount));
+    CUDA_CHECK(cudaFree(d_particleColors));
+
+    // Unmap and unregister
+    CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaVBOResource, 0));
+    CUDA_CHECK(cudaGraphicsUnregisterResource(cudaVBOResource));
 }

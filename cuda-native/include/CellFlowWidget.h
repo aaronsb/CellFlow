@@ -107,6 +107,7 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
 
 private slots:
@@ -154,13 +155,10 @@ private:
     // Effect settings
     int currentEffectType;
 
-    // Proximity graph rendering
-    void renderProximityGraph();
-    void updateProximityConnections();
+    // Proximity graph rendering (GPU-based with CUDA-OpenGL interop)
     QOpenGLShaderProgram* lineShaderProgram;
     QOpenGLBuffer lineBuffer;
     QOpenGLVertexArrayObject lineVAO;
-    std::vector<float> lineVertices;  // Vertex data for lines (pos + color)
     bool enableProximityGraph;
     float proximityDistance;
     int maxConnectionsPerParticle;
@@ -183,6 +181,11 @@ private:
     bool invertPan;
     bool invertForwardBack;
     bool invertRotation;
+
+    // Box selection for cluster focusing
+    bool isBoxSelecting;
+    QPoint boxSelectStart;
+    QPoint boxSelectEnd;
 
     // Frame rate limiting
     int frameRateCap;          // 0 = unlimited, 30, 60, etc.

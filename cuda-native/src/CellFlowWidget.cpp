@@ -20,6 +20,7 @@ CellFlowWidget::CellFlowWidget(QWidget* parent)
       cameraTargetX(0.0f), cameraTargetY(0.0f), cameraTargetZ(0.0f),
       isLeftMousePressed(false), isRightMousePressed(false),
       invertPan(true), invertForwardBack(false), invertRotation(false),
+      isBoxSelecting(false),
       frameRateCap(0), lastFrameTime(0) {
 
     // Force widget to be opaque - no transparency to desktop/other windows
@@ -93,10 +94,18 @@ void CellFlowWidget::initializeGL() {
 
     vao.release();
 
-    // Initialize line rendering for proximity graph
+    // Initialize line rendering for proximity graph (GPU-computed via CUDA)
     lineVAO.create();
     lineBuffer.create();
     lineBuffer.setUsagePattern(QOpenGLBuffer::DynamicDraw);
+
+    // Pre-allocate buffer for GPU writing via CUDA-OpenGL interop
+    // Max connections: particleCount * maxConnectionsPerParticle * 2 vertices * 6 floats
+    int maxVertices = particleData.size() * 20 * 2;  // Max 20 connections per particle
+    int bufferSize = maxVertices * 6 * sizeof(float);  // 6 floats per vertex (pos + color)
+    lineBuffer.bind();
+    lineBuffer.allocate(bufferSize);  // Allocate empty buffer for CUDA to write into
+    lineBuffer.release();
 
     // Create line shader
     lineShaderProgram = new QOpenGLShaderProgram(this);
@@ -109,20 +118,32 @@ void CellFlowWidget::initializeGL() {
         uniform mat4 projMatrix;
         uniform vec3 canvasSize;
         out vec3 lineColor;
+        out float depth;
         void main() {
             vec3 centeredPos = position - canvasSize * 0.5;
             vec4 viewPos = viewMatrix * vec4(centeredPos, 1.0);
             gl_Position = projMatrix * viewPos;
             lineColor = color;
+            depth = -viewPos.z;  // Distance from camera
         }
     )";
 
     const char* lineFragmentShader = R"(
         #version 150 core
         in vec3 lineColor;
+        in float depth;
+        uniform float depthFadeStart;
+        uniform float depthFadeEnd;
         out vec4 fragColor;
         void main() {
-            fragColor = vec4(lineColor, 0.3);  // Semi-transparent lines
+            // Depth fade: fade out distant lines
+            float fadeFactor = 1.0;
+            if (depth > depthFadeStart) {
+                fadeFactor = 1.0 - smoothstep(depthFadeStart, depthFadeEnd, depth);
+            }
+
+            float alpha = 0.3 * fadeFactor;  // Semi-transparent lines with depth fade
+            fragColor = vec4(lineColor, alpha);
         }
     )";
 
@@ -523,21 +544,70 @@ void CellFlowWidget::paintGL() {
     vao.release();
     shaderProgram->release();
 
-    // Render proximity graph (lines between nearby particles)
+    // Render proximity graph (lines between nearby particles) - GPU computed
     if (enableProximityGraph && lineShaderProgram) {
-        updateProximityConnections();
+        // Ensure VBO is large enough for current particle count
+        int currentParticleCount = particleData.size();
+        int maxVertices = currentParticleCount * maxConnectionsPerParticle * 2;
+        int requiredBufferSize = maxVertices * 6 * sizeof(float);
+
+        lineBuffer.bind();
+        if (lineBuffer.size() < requiredBufferSize) {
+            // Reallocate buffer if needed
+            lineBuffer.allocate(requiredBufferSize);
+            std::cout << "Reallocated proximity graph buffer for " << currentParticleCount
+                      << " particles (" << (requiredBufferSize / 1024 / 1024) << " MB)" << std::endl;
+        }
+        lineBuffer.release();
+
+        // Use CUDA-OpenGL interop to generate proximity graph entirely on GPU
+        int gpuVertexCount = 0;
+        simulation->generateProximityGraph(
+            lineBuffer.bufferId(),
+            gpuVertexCount,
+            proximityDistance,
+            maxConnectionsPerParticle,
+            particleColors
+        );
+
+        // Log periodically (every 5 seconds)
+        static qint64 lastLogTime = 0;
+        qint64 currentTime = frameTimer.elapsed();
+        if (currentTime - lastLogTime > 5000) {
+            std::cout << "Proximity graph (GPU): " << (gpuVertexCount / 2) << " connections, "
+                      << "distance: " << std::fixed << std::setprecision(2) << proximityDistance << std::endl;
+            lastLogTime = currentTime;
+        }
 
         lineShaderProgram->bind();
         lineShaderProgram->setUniformValue("viewMatrix", viewMatrix);
         lineShaderProgram->setUniformValue("projMatrix", projMatrix);
         lineShaderProgram->setUniformValue("canvasSize", QVector3D(params.canvasWidth, params.canvasHeight, params.canvasDepth));
+        lineShaderProgram->setUniformValue("depthFadeStart", params.depthFadeStart);
+        lineShaderProgram->setUniformValue("depthFadeEnd", params.depthFadeEnd);
 
         err = glGetError();
         if (err != GL_NO_ERROR) {
             std::cout << "GL error before proximity graph draw: " << err << std::endl;
         }
 
-        renderProximityGraph();
+        // Render directly from GPU-generated buffer
+        if (gpuVertexCount > 0) {
+            lineVAO.bind();
+            lineBuffer.bind();
+
+            // Set up vertex attributes (position + color, 6 floats per vertex)
+            lineShaderProgram->enableAttributeArray(0);
+            lineShaderProgram->setAttributeBuffer(0, GL_FLOAT, 0, 3, 6 * sizeof(float));
+
+            lineShaderProgram->enableAttributeArray(1);
+            lineShaderProgram->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 3, 6 * sizeof(float));
+
+            // Draw lines
+            glDrawArrays(GL_LINES, 0, gpuVertexCount);
+
+            lineVAO.release();
+        }
 
         err = glGetError();
         if (err != GL_NO_ERROR) {
@@ -558,6 +628,65 @@ void CellFlowWidget::paintGL() {
     err = glGetError();
     if (err != GL_NO_ERROR) {
         std::cout << "GL error at end of paintGL: " << err << std::endl;
+    }
+
+    // Draw selection box overlay (2D overlay on top of 3D scene)
+    if (isBoxSelecting) {
+        glDisable(GL_DEPTH_TEST);
+
+        // Use line shader for 2D overlay (it's simple enough)
+        if (lineShaderProgram) {
+            lineShaderProgram->bind();
+
+            // Set up orthographic projection for 2D screen space
+            QMatrix4x4 orthoProj;
+            orthoProj.ortho(0, width(), height(), 0, -1, 1);
+            QMatrix4x4 identity;
+
+            lineShaderProgram->setUniformValue("viewMatrix", identity);
+            lineShaderProgram->setUniformValue("projMatrix", orthoProj);
+            lineShaderProgram->setUniformValue("canvasSize", QVector3D(0, 0, 0));
+            lineShaderProgram->setUniformValue("depthFadeStart", 99999.0f);
+            lineShaderProgram->setUniformValue("depthFadeEnd", 99999.0f);
+
+            int minX = qMin(boxSelectStart.x(), boxSelectEnd.x());
+            int maxX = qMax(boxSelectStart.x(), boxSelectEnd.x());
+            int minY = qMin(boxSelectStart.y(), boxSelectEnd.y());
+            int maxY = qMax(boxSelectStart.y(), boxSelectEnd.y());
+
+            // Create vertices for selection box border
+            float boxVertices[] = {
+                // Line 1: top
+                (float)minX, (float)minY, 0.0f,  1.0f, 1.0f, 1.0f,
+                (float)maxX, (float)minY, 0.0f,  1.0f, 1.0f, 1.0f,
+                // Line 2: right
+                (float)maxX, (float)minY, 0.0f,  1.0f, 1.0f, 1.0f,
+                (float)maxX, (float)maxY, 0.0f,  1.0f, 1.0f, 1.0f,
+                // Line 3: bottom
+                (float)maxX, (float)maxY, 0.0f,  1.0f, 1.0f, 1.0f,
+                (float)minX, (float)maxY, 0.0f,  1.0f, 1.0f, 1.0f,
+                // Line 4: left
+                (float)minX, (float)maxY, 0.0f,  1.0f, 1.0f, 1.0f,
+                (float)minX, (float)minY, 0.0f,  1.0f, 1.0f, 1.0f,
+            };
+
+            lineVAO.bind();
+            lineBuffer.bind();
+            lineBuffer.allocate(boxVertices, sizeof(boxVertices));
+
+            lineShaderProgram->enableAttributeArray(0);
+            lineShaderProgram->setAttributeBuffer(0, GL_FLOAT, 0, 3, 6 * sizeof(float));
+            lineShaderProgram->enableAttributeArray(1);
+            lineShaderProgram->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 3, 6 * sizeof(float));
+
+            glLineWidth(2.0f);
+            glDrawArrays(GL_LINES, 0, 8);
+
+            lineVAO.release();
+            lineShaderProgram->release();
+        }
+
+        glEnable(GL_DEPTH_TEST);
     }
 
     // Update FPS
@@ -1129,8 +1258,15 @@ bool CellFlowWidget::savePreset(const QString& filename) {
 // Mouse event handlers for orbital camera
 void CellFlowWidget::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
-        isLeftMousePressed = true;
-        lastMousePos = event->pos();
+        // Shift+Left-click starts box selection for cluster focusing
+        if (event->modifiers() & Qt::ShiftModifier) {
+            isBoxSelecting = true;
+            boxSelectStart = event->pos();
+            boxSelectEnd = event->pos();
+        } else {
+            isLeftMousePressed = true;
+            lastMousePos = event->pos();
+        }
     } else if (event->button() == Qt::RightButton) {
         isRightMousePressed = true;
         lastMousePos = event->pos();
@@ -1140,6 +1276,128 @@ void CellFlowWidget::mousePressEvent(QMouseEvent* event) {
 
 void CellFlowWidget::mouseReleaseEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
+        if (isBoxSelecting) {
+            // Complete box selection - find particles in box and focus on centroid
+            isBoxSelecting = false;
+
+            if (!particleData.empty()) {
+                // Calculate box bounds in screen space
+                int minX = qMin(boxSelectStart.x(), boxSelectEnd.x());
+                int maxX = qMax(boxSelectStart.x(), boxSelectEnd.x());
+                int minY = qMin(boxSelectStart.y(), boxSelectEnd.y());
+                int maxY = qMax(boxSelectStart.y(), boxSelectEnd.y());
+
+                // Find particles within selection box (with depth filtering)
+                std::vector<int> selectedParticles;
+                std::vector<float> particleDepths;  // Track depth for filtering
+
+                // Create view and projection matrices (same as in paintGL)
+                QVector3D eye(cameraPosX, cameraPosY, cameraPosZ);
+                QVector3D center(cameraTargetX, cameraTargetY, cameraTargetZ);
+                QVector3D up(0.0f, 1.0f, 0.0f);
+
+                QMatrix4x4 viewMatrix;
+                viewMatrix.lookAt(eye, center, up);
+
+                float aspect = (float)width() / (float)height();
+                float maxUniverseSize = fmax(params.canvasWidth, fmax(params.canvasHeight, params.canvasDepth));
+                float universeDiagonal = sqrt(params.canvasWidth * params.canvasWidth +
+                                              params.canvasHeight * params.canvasHeight +
+                                              params.canvasDepth * params.canvasDepth);
+                float nearPlane = maxUniverseSize * 0.01f;
+                float farPlane = universeDiagonal * 2.5f;
+
+                QMatrix4x4 projMatrix;
+                projMatrix.perspective(45.0f, aspect, nearPlane, farPlane);
+
+                QMatrix4x4 mvp = projMatrix * viewMatrix;
+
+                // Project each particle to screen space and check if in box
+                for (int i = 0; i < particleData.size(); i++) {
+                    QVector3D particlePos(particleData[i].pos.x, particleData[i].pos.y, particleData[i].pos.z);
+                    QVector3D centeredPos = particlePos - QVector3D(params.canvasWidth * 0.5f,
+                                                                     params.canvasHeight * 0.5f,
+                                                                     params.canvasDepth * 0.5f);
+
+                    QVector4D clipPos = mvp * QVector4D(centeredPos, 1.0f);
+                    if (clipPos.w() > 0) {  // In front of camera
+                        // Convert to NDC
+                        QVector3D ndc(clipPos.x() / clipPos.w(), clipPos.y() / clipPos.w(), clipPos.z() / clipPos.w());
+
+                        // Convert to screen coordinates
+                        int screenX = (int)((ndc.x() + 1.0f) * 0.5f * width());
+                        int screenY = (int)((1.0f - ndc.y()) * 0.5f * height());
+
+                        // Check if in selection box
+                        if (screenX >= minX && screenX <= maxX && screenY >= minY && screenY <= maxY) {
+                            selectedParticles.push_back(i);
+                            particleDepths.push_back(ndc.z());  // Store depth for filtering
+                        }
+                    }
+                }
+
+                // Filter particles by depth - only keep those in the front 30% depth range
+                if (selectedParticles.size() > 50) {
+                    // Find min/max depth
+                    float minDepth = *std::min_element(particleDepths.begin(), particleDepths.end());
+                    float maxDepth = *std::max_element(particleDepths.begin(), particleDepths.end());
+                    float depthRange = maxDepth - minDepth;
+                    float depthThreshold = minDepth + depthRange * 0.3f;  // Front 30%
+
+                    // Filter to only front particles
+                    std::vector<int> filteredParticles;
+                    for (size_t i = 0; i < selectedParticles.size(); i++) {
+                        if (particleDepths[i] <= depthThreshold) {
+                            filteredParticles.push_back(selectedParticles[i]);
+                        }
+                    }
+
+                    if (!filteredParticles.empty()) {
+                        selectedParticles = filteredParticles;
+                    }
+                }
+
+                // Calculate centroid and focus camera
+                if (selectedParticles.size() >= 5) {  // Minimum selection
+                    QVector3D centroid(0, 0, 0);
+                    for (int idx : selectedParticles) {
+                        centroid.setX(centroid.x() + particleData[idx].pos.x);
+                        centroid.setY(centroid.y() + particleData[idx].pos.y);
+                        centroid.setZ(centroid.z() + particleData[idx].pos.z);
+                    }
+                    centroid /= selectedParticles.size();
+
+                    // Calculate cluster size (average distance from centroid)
+                    float avgRadius = 0.0f;
+                    for (int idx : selectedParticles) {
+                        QVector3D particlePos(particleData[idx].pos.x, particleData[idx].pos.y, particleData[idx].pos.z);
+                        avgRadius += (particlePos - centroid).length();
+                    }
+                    avgRadius /= selectedParticles.size();
+
+                    // Set new camera target (center coordinates to match rendering space)
+                    cameraTargetX = centroid.x() - params.canvasWidth * 0.5f;
+                    cameraTargetY = centroid.y() - params.canvasHeight * 0.5f;
+                    cameraTargetZ = centroid.z() - params.canvasDepth * 0.5f;
+
+                    // Set camera distance based on cluster size (3x radius for good framing)
+                    cameraDistance = avgRadius * 3.0f;
+                    cameraDistance = fmax(1000.0f, fmin(12000.0f, cameraDistance));  // Clamp
+
+                    std::cout << "Focused on selection: " << selectedParticles.size()
+                              << " particles at world (" << (int)centroid.x() << ", "
+                              << (int)centroid.y() << ", " << (int)centroid.z()
+                              << "), centered (" << (int)cameraTargetX << ", "
+                              << (int)cameraTargetY << ", " << (int)cameraTargetZ
+                              << "), radius: " << (int)avgRadius
+                              << ", distance: " << (int)cameraDistance << std::endl;
+                } else {
+                    std::cout << "Selection too small (" << selectedParticles.size() << " particles)" << std::endl;
+                }
+            }
+
+            update();
+        }
         isLeftMousePressed = false;
     } else if (event->button() == Qt::RightButton) {
         isRightMousePressed = false;
@@ -1151,7 +1409,11 @@ void CellFlowWidget::mouseMoveEvent(QMouseEvent* event) {
     QPoint delta = event->pos() - lastMousePos;
     lastMousePos = event->pos();
 
-    if (isLeftMousePressed) {
+    if (isBoxSelecting) {
+        // Update box selection area
+        boxSelectEnd = event->pos();
+        update();
+    } else if (isLeftMousePressed) {
         // Rotate camera (orbit)
         cameraRotationY += delta.x() * 0.5f;
         cameraRotationX -= delta.y() * 0.5f;
@@ -1229,6 +1491,97 @@ void CellFlowWidget::wheelEvent(QWheelEvent* event) {
     QOpenGLWidget::wheelEvent(event);
 }
 
+void CellFlowWidget::mouseDoubleClickEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton && !particleData.empty()) {
+        // Convert mouse position to normalized device coordinates
+        float x = (2.0f * event->pos().x()) / width() - 1.0f;
+        float y = 1.0f - (2.0f * event->pos().y()) / height();
+
+        // Create view and projection matrices (same as in paintGL)
+        QVector3D eye(cameraPosX, cameraPosY, cameraPosZ);
+        QVector3D center(cameraTargetX, cameraTargetY, cameraTargetZ);
+        QVector3D up(0.0f, 1.0f, 0.0f);
+
+        QMatrix4x4 viewMatrix;
+        viewMatrix.lookAt(eye, center, up);
+
+        float aspect = (float)width() / (float)height();
+        float maxUniverseSize = fmax(params.canvasWidth, fmax(params.canvasHeight, params.canvasDepth));
+        float universeDiagonal = sqrt(params.canvasWidth * params.canvasWidth +
+                                      params.canvasHeight * params.canvasHeight +
+                                      params.canvasDepth * params.canvasDepth);
+        float nearPlane = maxUniverseSize * 0.01f;
+        float farPlane = universeDiagonal * 2.5f;
+
+        QMatrix4x4 projMatrix;
+        projMatrix.perspective(45.0f, aspect, nearPlane, farPlane);
+
+        // Unproject to get ray in world space
+        QMatrix4x4 invVP = (projMatrix * viewMatrix).inverted();
+        QVector4D nearPoint = invVP * QVector4D(x, y, -1.0f, 1.0f);
+        QVector4D farPoint = invVP * QVector4D(x, y, 1.0f, 1.0f);
+
+        nearPoint /= nearPoint.w();
+        farPoint /= farPoint.w();
+
+        QVector3D rayOrigin(nearPoint.x(), nearPoint.y(), nearPoint.z());
+        QVector3D rayEnd(farPoint.x(), farPoint.y(), farPoint.z());
+        QVector3D rayDir = (rayEnd - rayOrigin).normalized();
+
+        // Find particles near the ray
+        std::vector<int> nearbyParticleIndices;
+        float searchRadius = 500.0f;  // Distance from ray to consider particles
+
+        for (int i = 0; i < particleData.size(); i++) {
+            QVector3D particlePos(particleData[i].pos.x, particleData[i].pos.y, particleData[i].pos.z);
+
+            // Account for centered coordinates
+            QVector3D centeredParticle = particlePos - QVector3D(params.canvasWidth * 0.5f,
+                                                                  params.canvasHeight * 0.5f,
+                                                                  params.canvasDepth * 0.5f);
+
+            // Calculate distance from particle to ray
+            QVector3D toParticle = centeredParticle - rayOrigin;
+            float t = QVector3D::dotProduct(toParticle, rayDir);
+            if (t > 0) {  // Particle is in front of camera
+                QVector3D closestPoint = rayOrigin + rayDir * t;
+                float distanceToRay = (centeredParticle - closestPoint).length();
+
+                if (distanceToRay < searchRadius) {
+                    nearbyParticleIndices.push_back(i);
+                }
+            }
+        }
+
+        // If we found a cluster, calculate its centroid
+        if (nearbyParticleIndices.size() >= 10) {  // Minimum cluster size
+            QVector3D centroid(0, 0, 0);
+            for (int idx : nearbyParticleIndices) {
+                centroid.setX(centroid.x() + particleData[idx].pos.x);
+                centroid.setY(centroid.y() + particleData[idx].pos.y);
+                centroid.setZ(centroid.z() + particleData[idx].pos.z);
+            }
+            centroid /= nearbyParticleIndices.size();
+
+            // Set new camera target
+            cameraTargetX = centroid.x();
+            cameraTargetY = centroid.y();
+            cameraTargetZ = centroid.z();
+
+            std::cout << "Focused on cluster: " << nearbyParticleIndices.size()
+                      << " particles at (" << (int)centroid.x() << ", "
+                      << (int)centroid.y() << ", " << (int)centroid.z() << ")" << std::endl;
+
+            update();
+        } else {
+            std::cout << "No dense cluster found at click location ("
+                      << nearbyParticleIndices.size() << " particles)" << std::endl;
+        }
+    }
+
+    QOpenGLWidget::mouseDoubleClickEvent(event);
+}
+
 // Proximity graph setters
 void CellFlowWidget::setEnableProximityGraph(bool enabled) {
     enableProximityGraph = enabled;
@@ -1245,105 +1598,5 @@ void CellFlowWidget::setMaxConnectionsPerParticle(int maxConnections) {
     std::cout << "Max connections per particle set to: " << maxConnections << std::endl;
 }
 
-// Update proximity connections between particles
-void CellFlowWidget::updateProximityConnections() {
-    lineVertices.clear();
-
-    if (!enableProximityGraph || particleData.empty()) {
-        return;
-    }
-
-    const float distSq = proximityDistance * proximityDistance;
-    const int numParticles = particleData.size();
-
-    // For each particle, find nearby particles of same type
-    for (int i = 0; i < numParticles; i++) {
-        const Particle& p1 = particleData[i];
-        int connectionCount = 0;
-
-        // Store connections with distances for sorting
-        std::vector<std::pair<int, float>> nearbyParticles;
-
-        for (int j = i + 1; j < numParticles; j++) {
-            const Particle& p2 = particleData[j];
-
-            // Only connect particles of same type
-            if (p1.ptype != p2.ptype) continue;
-
-            // Calculate distance squared (avoid sqrt for performance)
-            float dx = p2.pos.x - p1.pos.x;
-            float dy = p2.pos.y - p1.pos.y;
-            float dz = p2.pos.z - p1.pos.z;
-            float distSquared = dx*dx + dy*dy + dz*dz;
-
-            if (distSquared < distSq) {
-                nearbyParticles.push_back({j, distSquared});
-            }
-        }
-
-        // Sort by distance and take only maxConnectionsPerParticle closest
-        if (nearbyParticles.size() > maxConnectionsPerParticle) {
-            std::partial_sort(nearbyParticles.begin(),
-                            nearbyParticles.begin() + maxConnectionsPerParticle,
-                            nearbyParticles.end(),
-                            [](const auto& a, const auto& b) { return a.second < b.second; });
-            nearbyParticles.resize(maxConnectionsPerParticle);
-        }
-
-        // Add line vertices for each connection
-        const ParticleColor& color = particleColors[p1.ptype % particleColors.size()];
-
-        for (const auto& [j, dist] : nearbyParticles) {
-            const Particle& p2 = particleData[j];
-
-            // Add vertex 1 (position + color)
-            lineVertices.push_back(p1.pos.x);
-            lineVertices.push_back(p1.pos.y);
-            lineVertices.push_back(p1.pos.z);
-            lineVertices.push_back(color.r);
-            lineVertices.push_back(color.g);
-            lineVertices.push_back(color.b);
-
-            // Add vertex 2 (position + color)
-            lineVertices.push_back(p2.pos.x);
-            lineVertices.push_back(p2.pos.y);
-            lineVertices.push_back(p2.pos.z);
-            lineVertices.push_back(color.r);
-            lineVertices.push_back(color.g);
-            lineVertices.push_back(color.b);
-        }
-    }
-
-    // Log periodically (every 5 seconds) instead of every frame
-    static qint64 lastLogTime = 0;
-    qint64 currentTime = frameTimer.elapsed();
-    if (currentTime - lastLogTime > 5000) {
-        std::cout << "Proximity graph: " << (lineVertices.size() / 12) << " connections, "
-                  << "distance: " << std::fixed << std::setprecision(2) << proximityDistance << std::endl;
-        lastLogTime = currentTime;
-    }
-}
-
-// Render proximity graph lines
-void CellFlowWidget::renderProximityGraph() {
-    if (!enableProximityGraph || lineVertices.empty() || !lineShaderProgram) {
-        return;
-    }
-
-    lineVAO.bind();
-    lineBuffer.bind();
-    lineBuffer.allocate(lineVertices.data(), lineVertices.size() * sizeof(float));
-
-    // Set up vertex attributes (position + color, 6 floats per vertex)
-    lineShaderProgram->enableAttributeArray(0);
-    lineShaderProgram->setAttributeBuffer(0, GL_FLOAT, 0, 3, 6 * sizeof(float));
-
-    lineShaderProgram->enableAttributeArray(1);
-    lineShaderProgram->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 3, 6 * sizeof(float));
-
-    // Draw lines
-    int vertexCount = lineVertices.size() / 6;
-    glDrawArrays(GL_LINES, 0, vertexCount);
-
-    lineVAO.release();
-}
+// NOTE: Proximity graph methods removed - now computed entirely on GPU using CUDA-OpenGL interop
+// See ParticleSimulation::generateProximityGraph() and usage in paintGL()
