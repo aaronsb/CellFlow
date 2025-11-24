@@ -288,6 +288,19 @@ void MainWindow::setupUI() {
 
     controlLayout->addWidget(proximityGraphGroup);
 
+    // Triangle Mesh (Surface Rendering)
+    QGroupBox* triangleMeshGroup = new QGroupBox("Triangle Mesh", this);
+    QVBoxLayout* triangleMeshLayout = new QVBoxLayout(triangleMeshGroup);
+
+    // Enable checkbox
+    QCheckBox* enableTriangleMeshCheckbox = new QCheckBox("Enable Surface Mesh", this);
+    enableTriangleMeshCheckbox->setChecked(false);
+    connect(enableTriangleMeshCheckbox, &QCheckBox::toggled,
+            [this](bool checked) { cellFlowWidget->setEnableTriangleMesh(checked); });
+    triangleMeshLayout->addWidget(enableTriangleMeshCheckbox);
+
+    controlLayout->addWidget(triangleMeshGroup);
+
     // 3D Navigation
     QGroupBox* navGroup = new QGroupBox("3D Nav", this);
     QVBoxLayout* navLayout = new QVBoxLayout(navGroup);
