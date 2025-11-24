@@ -228,7 +228,7 @@ void CellFlowWidget::initializeGL() {
             // Combine lighting (diffuse + ambient + specular)
             vec3 lighting = fragColor * (ambient + diffuse) + vec3(1.0) * specular;
 
-            outColor = vec4(lighting, 0.8);  // Slightly transparent
+            outColor = vec4(lighting, 1.0);  // Opaque for solid surfaces
         }
     )";
 

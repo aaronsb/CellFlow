@@ -729,7 +729,8 @@ void ParticleSimulation::generateTriangleMesh(
     int blockSize = 256;
     int gridSize = (particleCount + blockSize - 1) / blockSize;
 
-    float distSq = proximityDistance * proximityDistance;
+    // Use slightly larger distance for triangle mesh (10% tolerance) to reduce popping
+    float distSq = proximityDistance * proximityDistance * 1.21f;  // 1.1^2 for 10% larger radius
     generateTriangleMeshKernel<<<gridSize, blockSize>>>(
         d_particles,
         particleCount,
