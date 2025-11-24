@@ -345,8 +345,8 @@ __global__ void generateTriangleMeshKernel(
             float distSq = dx*dx + dy*dy + dz*dz;
 
             if (distSq < proximityDistanceSq) {
-                // We have a closed triangle! Only add if idx < n1 < n2 to avoid duplicates
-                if (idx < n1 && n1 < n2) {
+                // We have a closed triangle! Only add if current particle has lowest index to avoid duplicates
+                if (idx < n1 && idx < n2) {
                     triangles[triangleCount].idx1 = idx;
                     triangles[triangleCount].idx2 = n1;
                     triangles[triangleCount].idx3 = n2;
