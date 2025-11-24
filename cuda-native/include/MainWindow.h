@@ -79,7 +79,11 @@ private slots:
     // DOF slots
     void onFocusDistanceChanged(int value);
     void onApertureSizeChanged(int value);
-    
+
+    // Proximity graph slots
+    void onProximityDistanceChanged(int value);
+    void onMaxConnectionsChanged(int value);
+
     void onRegenerateClicked();
     void onResetClicked();
     void onReXClicked();
@@ -171,6 +175,13 @@ private:
     QCheckBox* enableSizeAttenuationCheckbox;
     QCheckBox* enableBrightnessAttenuationCheckbox;
     QCheckBox* enableDOFCheckbox;
+
+    // Proximity graph controls
+    QCheckBox* enableProximityGraphCheckbox;
+    QSlider* proximityDistanceSlider;
+    QLineEdit* proximityDistanceEdit;
+    QSlider* maxConnectionsSlider;
+    QLineEdit* maxConnectionsEdit;
 
     QLabel* fpsLabel;
     QTableWidget* particleTypeTable;

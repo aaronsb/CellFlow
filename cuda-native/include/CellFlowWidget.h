@@ -78,6 +78,11 @@ public:
     // Frame rate control
     void setFrameRateCap(int capFps);  // 0 = unlimited, 30, 60, etc.
 
+    // Proximity graph (vertex connections between nearby particles)
+    void setEnableProximityGraph(bool enabled);
+    void setProximityDistance(float distance);
+    void setMaxConnectionsPerParticle(int maxConnections);
+
     // Get current parameters
     const SimulationParams& getParams() const { return params; }
     int getParticleCount() const;
@@ -148,6 +153,17 @@ private:
 
     // Effect settings
     int currentEffectType;
+
+    // Proximity graph rendering
+    void renderProximityGraph();
+    void updateProximityConnections();
+    QOpenGLShaderProgram* lineShaderProgram;
+    QOpenGLBuffer lineBuffer;
+    QOpenGLVertexArrayObject lineVAO;
+    std::vector<float> lineVertices;  // Vertex data for lines (pos + color)
+    bool enableProximityGraph;
+    float proximityDistance;
+    int maxConnectionsPerParticle;
 
     // 3D Camera parameters
     float cameraDistance;

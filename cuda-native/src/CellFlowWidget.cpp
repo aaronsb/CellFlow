@@ -12,15 +12,21 @@ CellFlowWidget::CellFlowWidget(QWidget* parent)
     : QOpenGLWidget(parent),
       simulation(std::make_unique<ParticleSimulation>(4000)),
       frameCount(0), currentFPS(0.0), lastFPSUpdate(0),
-      shaderProgram(nullptr), effectProgram(nullptr),
+      shaderProgram(nullptr), effectProgram(nullptr), lineShaderProgram(nullptr),
       particleTexture(0), effectFBO(nullptr), currentEffectType(0),
+      enableProximityGraph(false), proximityDistance(200.0f), maxConnectionsPerParticle(5),
       cameraDistance(3000.0f), cameraRotationX(30.0f), cameraRotationY(45.0f),
       cameraPosX(0.0f), cameraPosY(0.0f), cameraPosZ(0.0f),
       cameraTargetX(0.0f), cameraTargetY(0.0f), cameraTargetZ(0.0f),
       isLeftMousePressed(false), isRightMousePressed(false),
       invertPan(true), invertForwardBack(false), invertRotation(false),
       frameRateCap(0), lastFrameTime(0) {
-    
+
+    // Force widget to be opaque - no transparency to desktop/other windows
+    setAttribute(Qt::WA_OpaquePaintEvent);
+    setAttribute(Qt::WA_NoSystemBackground, false);
+    setAutoFillBackground(true);
+
     // Note: We don't use a fixed timer anymore - updates are driven by vsync
     // This allows the simulation to adapt to any refresh rate (60Hz, 120Hz, 144Hz, etc.)
     timer = new QTimer(this);
@@ -41,8 +47,11 @@ CellFlowWidget::~CellFlowWidget() {
     vao.destroy();
     quadVBO.destroy();
     quadVAO.destroy();
+    lineBuffer.destroy();
+    lineVAO.destroy();
     delete shaderProgram;
     delete effectProgram;
+    delete lineShaderProgram;
     if (particleTexture != 0) {
         glDeleteTextures(1, &particleTexture);
     }
@@ -69,20 +78,62 @@ void CellFlowWidget::initializeGL() {
     initializeShaders();
     initializeEffectShaders();
     initializeQuadBuffer();
-    
-    // Create VAO and VBO
+
+    // Create VAO and VBO for particles
     vao.create();
     vao.bind();
-    
+
     particleBuffer.create();
     particleBuffer.bind();
     particleBuffer.setUsagePattern(QOpenGLBuffer::DynamicDraw);
-    
+
     // Initial particle data fetch
     simulation->getParticleData(particleData);
     updateParticleBuffer();
-    
+
     vao.release();
+
+    // Initialize line rendering for proximity graph
+    lineVAO.create();
+    lineBuffer.create();
+    lineBuffer.setUsagePattern(QOpenGLBuffer::DynamicDraw);
+
+    // Create line shader
+    lineShaderProgram = new QOpenGLShaderProgram(this);
+
+    const char* lineVertexShader = R"(
+        #version 150 core
+        in vec3 position;
+        in vec3 color;
+        uniform mat4 viewMatrix;
+        uniform mat4 projMatrix;
+        uniform vec3 canvasSize;
+        out vec3 lineColor;
+        void main() {
+            vec3 centeredPos = position - canvasSize * 0.5;
+            vec4 viewPos = viewMatrix * vec4(centeredPos, 1.0);
+            gl_Position = projMatrix * viewPos;
+            lineColor = color;
+        }
+    )";
+
+    const char* lineFragmentShader = R"(
+        #version 150 core
+        in vec3 lineColor;
+        out vec4 fragColor;
+        void main() {
+            fragColor = vec4(lineColor, 0.3);  // Semi-transparent lines
+        }
+    )";
+
+    lineShaderProgram->addShaderFromSourceCode(QOpenGLShader::Vertex, lineVertexShader);
+    lineShaderProgram->addShaderFromSourceCode(QOpenGLShader::Fragment, lineFragmentShader);
+
+    if (!lineShaderProgram->link()) {
+        std::cerr << "Line shader linking failed: " << lineShaderProgram->log().toStdString() << std::endl;
+    } else {
+        std::cout << "Line shader linked successfully!" << std::endl;
+    }
 }
 
 void CellFlowWidget::initializeShaders() {
@@ -350,12 +401,15 @@ void CellFlowWidget::paintGL() {
     // Get updated particle data
     simulation->getParticleData(particleData);
 
-    // Debug output every 60 frames
-    if (frameCounter++ % 60 == 0 && !particleData.empty()) {
-        std::cout << "Frame " << frameCounter << ": " << particleData.size() << " particles, "
-                  << "First particle at (" << particleData[0].pos.x << ", "
-                  << particleData[0].pos.y << ", " << particleData[0].pos.z << ")"
+    // Debug output every 5 seconds (reduced logging)
+    static qint64 lastParticleLogTime = 0;
+    qint64 currentLogTime = frameTimer.elapsed();
+    if (currentLogTime - lastParticleLogTime > 5000 && !particleData.empty()) {
+        std::cout << "Simulation: " << particleData.size() << " particles, "
+                  << "first at (" << (int)particleData[0].pos.x << ", "
+                  << (int)particleData[0].pos.y << ", " << (int)particleData[0].pos.z << ")"
                   << std::endl;
+        lastParticleLogTime = currentLogTime;
     }
 
     // Always ensure we're rendering to the default framebuffer and clear it
@@ -454,27 +508,58 @@ void CellFlowWidget::paintGL() {
             QVector3D(particleColors[i].r, particleColors[i].g, particleColors[i].b));
     }
     
-    // Enable point rendering
+    // Enable point rendering (size set by shader via gl_PointSize)
     glEnable(GL_PROGRAM_POINT_SIZE);
-    glPointSize(2.0f);
-    
+
     // Draw particles as points
     int particleCount = particleData.size();
     glDrawArrays(GL_POINTS, 0, particleCount);
-    
-    vao.release();
-    shaderProgram->release();
-    
+
     err = glGetError();
     if (err != GL_NO_ERROR) {
-        std::cout << "GL error after point rendering: " << err << std::endl;
+        std::cout << "GL error after particle draw: " << err << std::endl;
     }
-    
+
+    vao.release();
+    shaderProgram->release();
+
+    // Render proximity graph (lines between nearby particles)
+    if (enableProximityGraph && lineShaderProgram) {
+        updateProximityConnections();
+
+        lineShaderProgram->bind();
+        lineShaderProgram->setUniformValue("viewMatrix", viewMatrix);
+        lineShaderProgram->setUniformValue("projMatrix", projMatrix);
+        lineShaderProgram->setUniformValue("canvasSize", QVector3D(params.canvasWidth, params.canvasHeight, params.canvasDepth));
+
+        err = glGetError();
+        if (err != GL_NO_ERROR) {
+            std::cout << "GL error before proximity graph draw: " << err << std::endl;
+        }
+
+        renderProximityGraph();
+
+        err = glGetError();
+        if (err != GL_NO_ERROR) {
+            std::cout << "GL error after proximity graph draw: " << err << std::endl;
+        }
+
+        lineShaderProgram->release();
+    }
+
+    // Wayland compositor fix: Clear alpha channel to prevent desktop showing through
+    // This is a workaround for Qt bug QTBUG-132197 on Wayland
+    // See: https://github.com/FreeCAD/FreeCAD/pull/19499
+    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);  // Only write to alpha
+    glClearColor(0.0, 0.0, 0.0, 1.0);  // Set alpha to 1.0 (fully opaque)
+    glClear(GL_COLOR_BUFFER_BIT);  // Clear only alpha, RGB stays intact
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);  // Re-enable all channels
+
     err = glGetError();
     if (err != GL_NO_ERROR) {
         std::cout << "GL error at end of paintGL: " << err << std::endl;
     }
-    
+
     // Update FPS
     frameCount++;
     qint64 currentTime = frameTimer.elapsed();
@@ -1142,4 +1227,123 @@ void CellFlowWidget::wheelEvent(QWheelEvent* event) {
 
     update(); // Trigger repaint
     QOpenGLWidget::wheelEvent(event);
+}
+
+// Proximity graph setters
+void CellFlowWidget::setEnableProximityGraph(bool enabled) {
+    enableProximityGraph = enabled;
+    std::cout << "Proximity graph " << (enabled ? "enabled" : "disabled") << std::endl;
+}
+
+void CellFlowWidget::setProximityDistance(float distance) {
+    proximityDistance = distance;
+    std::cout << "Proximity distance set to: " << distance << std::endl;
+}
+
+void CellFlowWidget::setMaxConnectionsPerParticle(int maxConnections) {
+    maxConnectionsPerParticle = maxConnections;
+    std::cout << "Max connections per particle set to: " << maxConnections << std::endl;
+}
+
+// Update proximity connections between particles
+void CellFlowWidget::updateProximityConnections() {
+    lineVertices.clear();
+
+    if (!enableProximityGraph || particleData.empty()) {
+        return;
+    }
+
+    const float distSq = proximityDistance * proximityDistance;
+    const int numParticles = particleData.size();
+
+    // For each particle, find nearby particles of same type
+    for (int i = 0; i < numParticles; i++) {
+        const Particle& p1 = particleData[i];
+        int connectionCount = 0;
+
+        // Store connections with distances for sorting
+        std::vector<std::pair<int, float>> nearbyParticles;
+
+        for (int j = i + 1; j < numParticles; j++) {
+            const Particle& p2 = particleData[j];
+
+            // Only connect particles of same type
+            if (p1.ptype != p2.ptype) continue;
+
+            // Calculate distance squared (avoid sqrt for performance)
+            float dx = p2.pos.x - p1.pos.x;
+            float dy = p2.pos.y - p1.pos.y;
+            float dz = p2.pos.z - p1.pos.z;
+            float distSquared = dx*dx + dy*dy + dz*dz;
+
+            if (distSquared < distSq) {
+                nearbyParticles.push_back({j, distSquared});
+            }
+        }
+
+        // Sort by distance and take only maxConnectionsPerParticle closest
+        if (nearbyParticles.size() > maxConnectionsPerParticle) {
+            std::partial_sort(nearbyParticles.begin(),
+                            nearbyParticles.begin() + maxConnectionsPerParticle,
+                            nearbyParticles.end(),
+                            [](const auto& a, const auto& b) { return a.second < b.second; });
+            nearbyParticles.resize(maxConnectionsPerParticle);
+        }
+
+        // Add line vertices for each connection
+        const ParticleColor& color = particleColors[p1.ptype % particleColors.size()];
+
+        for (const auto& [j, dist] : nearbyParticles) {
+            const Particle& p2 = particleData[j];
+
+            // Add vertex 1 (position + color)
+            lineVertices.push_back(p1.pos.x);
+            lineVertices.push_back(p1.pos.y);
+            lineVertices.push_back(p1.pos.z);
+            lineVertices.push_back(color.r);
+            lineVertices.push_back(color.g);
+            lineVertices.push_back(color.b);
+
+            // Add vertex 2 (position + color)
+            lineVertices.push_back(p2.pos.x);
+            lineVertices.push_back(p2.pos.y);
+            lineVertices.push_back(p2.pos.z);
+            lineVertices.push_back(color.r);
+            lineVertices.push_back(color.g);
+            lineVertices.push_back(color.b);
+        }
+    }
+
+    // Log periodically (every 5 seconds) instead of every frame
+    static qint64 lastLogTime = 0;
+    qint64 currentTime = frameTimer.elapsed();
+    if (currentTime - lastLogTime > 5000) {
+        std::cout << "Proximity graph: " << (lineVertices.size() / 12) << " connections, "
+                  << "distance: " << std::fixed << std::setprecision(2) << proximityDistance << std::endl;
+        lastLogTime = currentTime;
+    }
+}
+
+// Render proximity graph lines
+void CellFlowWidget::renderProximityGraph() {
+    if (!enableProximityGraph || lineVertices.empty() || !lineShaderProgram) {
+        return;
+    }
+
+    lineVAO.bind();
+    lineBuffer.bind();
+    lineBuffer.allocate(lineVertices.data(), lineVertices.size() * sizeof(float));
+
+    // Set up vertex attributes (position + color, 6 floats per vertex)
+    lineShaderProgram->enableAttributeArray(0);
+    lineShaderProgram->setAttributeBuffer(0, GL_FLOAT, 0, 3, 6 * sizeof(float));
+
+    lineShaderProgram->enableAttributeArray(1);
+    lineShaderProgram->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 3, 6 * sizeof(float));
+
+    // Draw lines
+    int vertexCount = lineVertices.size() / 6;
+    glDrawArrays(GL_LINES, 0, vertexCount);
+
+    lineVAO.release();
 }
