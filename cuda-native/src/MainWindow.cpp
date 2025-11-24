@@ -286,6 +286,32 @@ void MainWindow::setupUI() {
     maxConnectionsLayout->addWidget(maxConnectionsEdit);
     proximityGraphLayout->addLayout(maxConnectionsLayout);
 
+    // Radiance intensity slider (0.1 to 2.0 - controls brightness of connections)
+    QHBoxLayout* radianceLayout = new QHBoxLayout();
+    QLabel* radianceLabel = new QLabel("Radiance Intensity:", this);
+    QSlider* radianceSlider = new QSlider(Qt::Horizontal, this);
+    radianceSlider->setRange(10, 200);  // 0.1 to 2.0 in 0.01 increments
+    radianceSlider->setValue(50);  // Default 0.5
+    QLineEdit* radianceEdit = new QLineEdit("0.50", this);
+    radianceEdit->setMaximumWidth(60);
+    radianceEdit->setValidator(new QDoubleValidator(0.1, 2.0, 2, this));
+
+    connect(radianceSlider, &QSlider::valueChanged, [this, radianceEdit](int value) {
+        float intensity = value / 100.0f;
+        radianceEdit->setText(QString::number(intensity, 'f', 2));
+        cellFlowWidget->setRadianceIntensity(intensity);
+    });
+
+    connect(radianceEdit, &QLineEdit::editingFinished, [radianceSlider, radianceEdit]() {
+        float value = radianceEdit->text().toFloat();
+        radianceSlider->setValue(static_cast<int>(value * 100));
+    });
+
+    radianceLayout->addWidget(radianceLabel);
+    radianceLayout->addWidget(radianceSlider);
+    radianceLayout->addWidget(radianceEdit);
+    proximityGraphLayout->addLayout(radianceLayout);
+
     controlLayout->addWidget(proximityGraphGroup);
 
     // 3D Navigation

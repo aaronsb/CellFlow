@@ -15,6 +15,7 @@ CellFlowWidget::CellFlowWidget(QWidget* parent)
       shaderProgram(nullptr), effectProgram(nullptr), lineShaderProgram(nullptr),
       particleTexture(0), effectFBO(nullptr), currentEffectType(0),
       enableProximityGraph(false), proximityDistance(200.0f), maxConnectionsPerParticle(5),
+      radianceIntensity(0.5f),
       cameraDistance(3000.0f), cameraRotationX(30.0f), cameraRotationY(45.0f),
       cameraPosX(0.0f), cameraPosY(0.0f), cameraPosZ(0.0f),
       cameraTargetX(0.0f), cameraTargetY(0.0f), cameraTargetZ(0.0f),
@@ -134,16 +135,19 @@ void CellFlowWidget::initializeGL() {
         in float depth;
         uniform float depthFadeStart;
         uniform float depthFadeEnd;
+        uniform float radianceIntensity;  // Controls brightness of radiance
         out vec4 fragColor;
         void main() {
-            // Depth fade: fade out distant lines
+            // Depth fade: fade out distant connections
             float fadeFactor = 1.0;
             if (depth > depthFadeStart) {
                 fadeFactor = 1.0 - smoothstep(depthFadeStart, depthFadeEnd, depth);
             }
 
-            float alpha = 0.3 * fadeFactor;  // Semi-transparent lines with depth fade
-            fragColor = vec4(lineColor, alpha);
+            // Radiance field: use additive blending with brighter colors
+            // More overlapping connections = brighter glow
+            float intensity = radianceIntensity * fadeFactor;
+            fragColor = vec4(lineColor * intensity, 1.0);
         }
     )";
 
@@ -585,6 +589,7 @@ void CellFlowWidget::paintGL() {
         lineShaderProgram->setUniformValue("canvasSize", QVector3D(params.canvasWidth, params.canvasHeight, params.canvasDepth));
         lineShaderProgram->setUniformValue("depthFadeStart", params.depthFadeStart);
         lineShaderProgram->setUniformValue("depthFadeEnd", params.depthFadeEnd);
+        lineShaderProgram->setUniformValue("radianceIntensity", radianceIntensity);
 
         err = glGetError();
         if (err != GL_NO_ERROR) {
@@ -593,6 +598,11 @@ void CellFlowWidget::paintGL() {
 
         // Render directly from GPU-generated buffer
         if (gpuVertexCount > 0) {
+            // Enable additive blending for radiance field effect
+            // More overlapping connections = brighter accumulated glow
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_ONE, GL_ONE);  // Additive blending
+
             lineVAO.bind();
             lineBuffer.bind();
 
@@ -603,10 +613,13 @@ void CellFlowWidget::paintGL() {
             lineShaderProgram->enableAttributeArray(1);
             lineShaderProgram->setAttributeBuffer(1, GL_FLOAT, 3 * sizeof(float), 3, 6 * sizeof(float));
 
-            // Draw lines
+            // Draw lines with radiance
             glDrawArrays(GL_LINES, 0, gpuVertexCount);
 
             lineVAO.release();
+
+            // Restore normal alpha blending
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         }
 
         err = glGetError();
@@ -1598,5 +1611,11 @@ void CellFlowWidget::setMaxConnectionsPerParticle(int maxConnections) {
     std::cout << "Max connections per particle set to: " << maxConnections << std::endl;
 }
 
-// NOTE: Proximity graph methods removed - now computed entirely on GPU using CUDA-OpenGL interop
-// See ParticleSimulation::generateProximityGraph() and usage in paintGL()
+void CellFlowWidget::setRadianceIntensity(float intensity) {
+    radianceIntensity = intensity;
+    std::cout << "Radiance intensity set to: " << intensity << std::endl;
+}
+
+// NOTE: Proximity graph radiance field computed entirely on GPU using CUDA-OpenGL interop
+// Connections emit soft radiance using additive blending for volumetric appearance
+// See ParticleSimulation::generateProximityGraph() in paintGL()

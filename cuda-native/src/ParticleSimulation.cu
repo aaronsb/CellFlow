@@ -276,6 +276,153 @@ __global__ void generateProximityGraphKernel(
     }
 }
 
+// Triangle mesh generation kernel - finds closed triangles in proximity graph
+__global__ void generateTriangleMeshKernel(
+    const Particle* particles,
+    int particleCount,
+    float proximityDistanceSq,
+    int maxConnectionsPerParticle,
+    const ParticleColor* particleColors,
+    int numParticleTypes,
+    float* triangleVertices,
+    int* vertexCount
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= particleCount) return;
+
+    const Particle& p1 = particles[idx];
+
+    // Find nearby particles of same type
+    struct NearbyParticle {
+        float distSq;
+        int index;
+    };
+
+    NearbyParticle nearby[32];
+    int nearbyCount = 0;
+    int maxConn = min(maxConnectionsPerParticle, 32);
+
+    // Build neighbor list for this particle
+    for (int j = 0; j < particleCount && nearbyCount < maxConn; j++) {
+        if (j == idx) continue;
+        const Particle& p2 = particles[j];
+
+        // Only connect particles of same type
+        if (p1.ptype != p2.ptype) continue;
+
+        // Calculate distance squared
+        float dx = p2.pos.x - p1.pos.x;
+        float dy = p2.pos.y - p1.pos.y;
+        float dz = p2.pos.z - p1.pos.z;
+        float distSq = dx*dx + dy*dy + dz*dz;
+
+        if (distSq < proximityDistanceSq) {
+            nearby[nearbyCount].distSq = distSq;
+            nearby[nearbyCount].index = j;
+            nearbyCount++;
+        }
+    }
+
+    // Fan triangulation: create triangles from particle to ALL pairs of neighbors
+    // This creates more aggressive surface coverage without requiring mutual connectivity
+    int triangleCount = 0;
+    struct Triangle {
+        int idx1, idx2, idx3;  // Indices of the three particles
+    };
+    Triangle triangles[64];  // Store up to 64 triangles per particle
+
+    for (int i = 0; i < nearbyCount && triangleCount < 64; i++) {
+        for (int j = i + 1; j < nearbyCount && triangleCount < 64; j++) {
+            int n1 = nearby[i].index;
+            int n2 = nearby[j].index;
+
+            // Fan triangulation: create triangle without checking if neighbors are connected
+            // Only add if current particle has lowest index to avoid duplicates
+            if (idx < n1 && idx < n2) {
+                triangles[triangleCount].idx1 = idx;
+                triangles[triangleCount].idx2 = n1;
+                triangles[triangleCount].idx3 = n2;
+                triangleCount++;
+            }
+        }
+    }
+
+    // Write triangles to output buffer
+    if (triangleCount > 0) {
+        // Atomically allocate space in output buffer
+        int writeOffset = atomicAdd(vertexCount, triangleCount * 3);  // 3 vertices per triangle
+
+        // Get particle color
+        const ParticleColor& color = particleColors[p1.ptype % numParticleTypes];
+
+        // Write triangle vertices
+        for (int t = 0; t < triangleCount; t++) {
+            const Particle& v1 = particles[triangles[t].idx1];
+            const Particle& v2 = particles[triangles[t].idx2];
+            const Particle& v3 = particles[triangles[t].idx3];
+
+            // Calculate triangle normal (cross product of two edges)
+            float edge1x = v2.pos.x - v1.pos.x;
+            float edge1y = v2.pos.y - v1.pos.y;
+            float edge1z = v2.pos.z - v1.pos.z;
+
+            float edge2x = v3.pos.x - v1.pos.x;
+            float edge2y = v3.pos.y - v1.pos.y;
+            float edge2z = v3.pos.z - v1.pos.z;
+
+            // Cross product
+            float nx = edge1y * edge2z - edge1z * edge2y;
+            float ny = edge1z * edge2x - edge1x * edge2z;
+            float nz = edge1x * edge2y - edge1y * edge2x;
+
+            // Normalize
+            float length = sqrtf(nx*nx + ny*ny + nz*nz);
+            if (length > 0.0001f) {
+                nx /= length;
+                ny /= length;
+                nz /= length;
+            }
+
+            // Write 3 vertices (each vertex: position + normal + color = 9 floats)
+            // All vertices share the same normal for flat shading
+            int baseIdx = (writeOffset + t * 3) * 9;
+
+            // Vertex 1
+            triangleVertices[baseIdx + 0] = v1.pos.x;
+            triangleVertices[baseIdx + 1] = v1.pos.y;
+            triangleVertices[baseIdx + 2] = v1.pos.z;
+            triangleVertices[baseIdx + 3] = nx;
+            triangleVertices[baseIdx + 4] = ny;
+            triangleVertices[baseIdx + 5] = nz;
+            triangleVertices[baseIdx + 6] = color.r;
+            triangleVertices[baseIdx + 7] = color.g;
+            triangleVertices[baseIdx + 8] = color.b;
+
+            // Vertex 2
+            triangleVertices[baseIdx + 9] = v2.pos.x;
+            triangleVertices[baseIdx + 10] = v2.pos.y;
+            triangleVertices[baseIdx + 11] = v2.pos.z;
+            triangleVertices[baseIdx + 12] = nx;
+            triangleVertices[baseIdx + 13] = ny;
+            triangleVertices[baseIdx + 14] = nz;
+            triangleVertices[baseIdx + 15] = color.r;
+            triangleVertices[baseIdx + 16] = color.g;
+            triangleVertices[baseIdx + 17] = color.b;
+
+            // Vertex 3
+            triangleVertices[baseIdx + 18] = v3.pos.x;
+            triangleVertices[baseIdx + 19] = v3.pos.y;
+            triangleVertices[baseIdx + 20] = v3.pos.z;
+            triangleVertices[baseIdx + 21] = nx;
+            triangleVertices[baseIdx + 22] = ny;
+            triangleVertices[baseIdx + 23] = nz;
+            triangleVertices[baseIdx + 24] = color.r;
+            triangleVertices[baseIdx + 25] = color.g;
+            triangleVertices[baseIdx + 26] = color.b;
+        }
+    }
+}
+
 // ParticleSimulation implementation
 ParticleSimulation::ParticleSimulation(int particleCount)
     : particleCount(particleCount), numParticleTypes(6), useBufferAasInput(true),
@@ -519,6 +666,73 @@ void ParticleSimulation::generateProximityGraph(
         d_particleColors,
         numParticleTypes,
         d_lineVertices,
+        d_vertexCount
+    );
+
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    // Get vertex count
+    int h_vertexCount;
+    CUDA_CHECK(cudaMemcpy(&h_vertexCount, d_vertexCount, sizeof(int), cudaMemcpyDeviceToHost));
+    outVertexCount = h_vertexCount;
+
+    // Cleanup
+    CUDA_CHECK(cudaFree(d_vertexCount));
+    CUDA_CHECK(cudaFree(d_particleColors));
+
+    // Unmap and unregister
+    CUDA_CHECK(cudaGraphicsUnmapResources(1, &cudaVBOResource, 0));
+    CUDA_CHECK(cudaGraphicsUnregisterResource(cudaVBOResource));
+}
+
+void ParticleSimulation::generateTriangleMesh(
+    unsigned int openglVBO,
+    int& outVertexCount,
+    float proximityDistance,
+    int maxConnectionsPerParticle,
+    const std::vector<ParticleColor>& particleColors
+) {
+    // Register OpenGL VBO with CUDA
+    cudaGraphicsResource* cudaVBOResource;
+    CUDA_CHECK(cudaGraphicsGLRegisterBuffer(&cudaVBOResource, openglVBO,
+        cudaGraphicsMapFlagsWriteDiscard));
+
+    // Map the buffer for CUDA writing
+    CUDA_CHECK(cudaGraphicsMapResources(1, &cudaVBOResource, 0));
+
+    float* d_triangleVertices;
+    size_t numBytes;
+    CUDA_CHECK(cudaGraphicsResourceGetMappedPointer((void**)&d_triangleVertices,
+        &numBytes, cudaVBOResource));
+
+    // Allocate device memory for vertex count
+    int* d_vertexCount;
+    CUDA_CHECK(cudaMalloc(&d_vertexCount, sizeof(int)));
+    CUDA_CHECK(cudaMemset(d_vertexCount, 0, sizeof(int)));
+
+    // Copy particle colors to device
+    ParticleColor* d_particleColors;
+    CUDA_CHECK(cudaMalloc(&d_particleColors, particleColors.size() * sizeof(ParticleColor)));
+    CUDA_CHECK(cudaMemcpy(d_particleColors, particleColors.data(),
+        particleColors.size() * sizeof(ParticleColor), cudaMemcpyHostToDevice));
+
+    // Launch kernel
+    int blockSize = 256;
+    int gridSize = (particleCount + blockSize - 1) / blockSize;
+
+    // Hysteresis: Use larger distance threshold for triangle mesh to prevent disconnection popping
+    // This epsilon keeps triangles connected longer as particles move apart, reducing flicker
+    float hysteresisMultiplier = 1.2f;  // 20% larger radius for stability
+    float distSq = proximityDistance * proximityDistance * (hysteresisMultiplier * hysteresisMultiplier);
+    generateTriangleMeshKernel<<<gridSize, blockSize>>>(
+        d_particles,
+        particleCount,
+        distSq,
+        maxConnectionsPerParticle,
+        d_particleColors,
+        numParticleTypes,
+        d_triangleVertices,
         d_vertexCount
     );
 
