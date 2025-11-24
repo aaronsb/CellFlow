@@ -219,14 +219,8 @@ void CellFlowWidget::initializeGL() {
             // Ambient light
             float ambient = 0.3;
 
-            // Specular highlight (Blinn-Phong)
-            vec3 viewDir = normalize(-fragPos);  // View direction in view space
-            vec3 halfDir = normalize(lightDir + viewDir);
-            float specAngle = max(dot(N, halfDir), 0.0);
-            float specular = pow(specAngle, 32.0) * 0.5;  // Shininess = 32
-
-            // Combine lighting (diffuse + ambient + specular)
-            vec3 lighting = fragColor * (ambient + diffuse) + vec3(1.0) * specular;
+            // Combine lighting (diffuse + ambient only, no specular for matte look)
+            vec3 lighting = fragColor * (ambient + diffuse);
 
             outColor = vec4(lighting, 1.0);  // Opaque for solid surfaces
         }
