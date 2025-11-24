@@ -323,7 +323,8 @@ __global__ void generateTriangleMeshKernel(
         }
     }
 
-    // Now find closed triangles: for each pair of neighbors, check if they're connected
+    // Fan triangulation: create triangles from particle to ALL pairs of neighbors
+    // This creates more aggressive surface coverage without requiring mutual connectivity
     int triangleCount = 0;
     struct Triangle {
         int idx1, idx2, idx3;  // Indices of the three particles
@@ -335,23 +336,13 @@ __global__ void generateTriangleMeshKernel(
             int n1 = nearby[i].index;
             int n2 = nearby[j].index;
 
-            // Check if n1 and n2 are connected (within proximity distance)
-            const Particle& pn1 = particles[n1];
-            const Particle& pn2 = particles[n2];
-
-            float dx = pn2.pos.x - pn1.pos.x;
-            float dy = pn2.pos.y - pn1.pos.y;
-            float dz = pn2.pos.z - pn1.pos.z;
-            float distSq = dx*dx + dy*dy + dz*dz;
-
-            if (distSq < proximityDistanceSq) {
-                // We have a closed triangle! Only add if current particle has lowest index to avoid duplicates
-                if (idx < n1 && idx < n2) {
-                    triangles[triangleCount].idx1 = idx;
-                    triangles[triangleCount].idx2 = n1;
-                    triangles[triangleCount].idx3 = n2;
-                    triangleCount++;
-                }
+            // Fan triangulation: create triangle without checking if neighbors are connected
+            // Only add if current particle has lowest index to avoid duplicates
+            if (idx < n1 && idx < n2) {
+                triangles[triangleCount].idx1 = idx;
+                triangles[triangleCount].idx2 = n1;
+                triangles[triangleCount].idx3 = n2;
+                triangleCount++;
             }
         }
     }
