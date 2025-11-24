@@ -730,8 +730,10 @@ void ParticleSimulation::generateTriangleMesh(
     int blockSize = 256;
     int gridSize = (particleCount + blockSize - 1) / blockSize;
 
-    // Use slightly larger distance for triangle mesh (10% tolerance) to reduce popping
-    float distSq = proximityDistance * proximityDistance * 1.21f;  // 1.1^2 for 10% larger radius
+    // Hysteresis: Use larger distance threshold for triangle mesh to prevent disconnection popping
+    // This epsilon keeps triangles connected longer as particles move apart, reducing flicker
+    float hysteresisMultiplier = 1.2f;  // 20% larger radius for stability
+    float distSq = proximityDistance * proximityDistance * (hysteresisMultiplier * hysteresisMultiplier);
     generateTriangleMeshKernel<<<gridSize, blockSize>>>(
         d_particles,
         particleCount,
