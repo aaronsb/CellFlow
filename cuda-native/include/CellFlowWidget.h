@@ -78,6 +78,11 @@ public:
     // Frame rate control
     void setFrameRateCap(int capFps);  // 0 = unlimited, 30, 60, etc.
 
+    // Proximity graph (vertex connections between nearby particles)
+    void setEnableProximityGraph(bool enabled);
+    void setProximityDistance(float distance);
+    void setMaxConnectionsPerParticle(int maxConnections);
+
     // Get current parameters
     const SimulationParams& getParams() const { return params; }
     int getParticleCount() const;
@@ -102,6 +107,7 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
 
 private slots:
@@ -149,6 +155,14 @@ private:
     // Effect settings
     int currentEffectType;
 
+    // Proximity graph rendering (GPU-based with CUDA-OpenGL interop)
+    QOpenGLShaderProgram* lineShaderProgram;
+    QOpenGLBuffer lineBuffer;
+    QOpenGLVertexArrayObject lineVAO;
+    bool enableProximityGraph;
+    float proximityDistance;
+    int maxConnectionsPerParticle;
+
     // 3D Camera parameters
     float cameraDistance;
     float cameraRotationX;
@@ -167,6 +181,11 @@ private:
     bool invertPan;
     bool invertForwardBack;
     bool invertRotation;
+
+    // Box selection for cluster focusing
+    bool isBoxSelecting;
+    QPoint boxSelectStart;
+    QPoint boxSelectEnd;
 
     // Frame rate limiting
     int frameRateCap;          // 0 = unlimited, 30, 60, etc.

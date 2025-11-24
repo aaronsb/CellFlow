@@ -63,11 +63,16 @@ void ColorSquareWidget::mouseReleaseEvent(QMouseEvent*) {
 }
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
+    // Ensure window is fully opaque
+    setAttribute(Qt::WA_OpaquePaintEvent);
+    setAutoFillBackground(true);
+    setWindowOpacity(1.0);
+
     setupUI();
-    
+
     // Load preset 1 by default
     cellFlowWidget->loadPreset("presets/1.json");
-    
+
     // Initial update of particle type table
     updateParticleTypeTable();
 }
@@ -76,9 +81,20 @@ void MainWindow::setupUI() {
     // Create central widget
     QWidget* centralWidget = new QWidget(this);
     setCentralWidget(centralWidget);
-    
+
     QHBoxLayout* mainLayout = new QHBoxLayout(centralWidget);
-    
+
+    // Configure OpenGL surface format before creating widget
+    QSurfaceFormat format;
+    format.setRenderableType(QSurfaceFormat::OpenGL);  // Use desktop OpenGL, not ES
+    format.setVersion(3, 3);  // Request OpenGL 3.3 or higher
+    format.setProfile(QSurfaceFormat::CoreProfile);
+    format.setDepthBufferSize(24);
+    format.setAlphaBufferSize(0);  // No alpha channel - prevents desktop showing through
+    format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
+    format.setSwapInterval(1);  // Enable vsync
+    QSurfaceFormat::setDefaultFormat(format);
+
     // Create OpenGL widget
     cellFlowWidget = new CellFlowWidget(this);
     cellFlowWidget->setMinimumSize(800, 600);
@@ -230,6 +246,47 @@ void MainWindow::setupUI() {
     renderLayout->addLayout(effectLayout);
     
     controlLayout->addWidget(renderGroup);
+
+    // Proximity Graph (Network Visualization)
+    QGroupBox* proximityGraphGroup = new QGroupBox("Proximity Graph", this);
+    QVBoxLayout* proximityGraphLayout = new QVBoxLayout(proximityGraphGroup);
+
+    // Enable checkbox
+    enableProximityGraphCheckbox = new QCheckBox("Enable Network Lines", this);
+    enableProximityGraphCheckbox->setChecked(false);
+    connect(enableProximityGraphCheckbox, &QCheckBox::toggled,
+            [this](bool checked) { cellFlowWidget->setEnableProximityGraph(checked); });
+    proximityGraphLayout->addWidget(enableProximityGraphCheckbox);
+
+    // Distance threshold slider (0 to 500 - fine control in useful range)
+    proximityGraphLayout->addWidget(createControlGroup("Distance", proximityDistanceSlider, proximityDistanceEdit, 0.0, 500.0, 100.0, 5.0));
+
+    // Max connections slider (use integer slider)
+    QHBoxLayout* maxConnectionsLayout = new QHBoxLayout();
+    QLabel* maxConnectionsLabel = new QLabel("Max Connections:", this);
+    maxConnectionsSlider = new QSlider(Qt::Horizontal, this);
+    maxConnectionsSlider->setRange(1, 20);
+    maxConnectionsSlider->setValue(5);
+    maxConnectionsEdit = new QLineEdit(QString::number(5), this);
+    maxConnectionsEdit->setMaximumWidth(60);
+    maxConnectionsEdit->setValidator(new QIntValidator(1, 20, this));
+
+    connect(maxConnectionsSlider, &QSlider::valueChanged, [this](int value) {
+        maxConnectionsEdit->setText(QString::number(value));
+        onMaxConnectionsChanged(value);
+    });
+
+    connect(maxConnectionsEdit, &QLineEdit::editingFinished, [this]() {
+        int value = maxConnectionsEdit->text().toInt();
+        maxConnectionsSlider->setValue(value);
+    });
+
+    maxConnectionsLayout->addWidget(maxConnectionsLabel);
+    maxConnectionsLayout->addWidget(maxConnectionsSlider);
+    maxConnectionsLayout->addWidget(maxConnectionsEdit);
+    proximityGraphLayout->addLayout(maxConnectionsLayout);
+
+    controlLayout->addWidget(proximityGraphGroup);
 
     // 3D Navigation
     QGroupBox* navGroup = new QGroupBox("3D Nav", this);
@@ -429,6 +486,7 @@ QWidget* MainWindow::createControlGroup(const QString& label, QSlider*& slider,
     else if (label == "Bright Min") connect(slider, &QSlider::valueChanged, this, &MainWindow::onBrightnessMinChanged);
     else if (label == "Focus Dist") connect(slider, &QSlider::valueChanged, this, &MainWindow::onFocusDistanceChanged);
     else if (label == "Aperture") connect(slider, &QSlider::valueChanged, this, &MainWindow::onApertureSizeChanged);
+    else if (label == "Distance") connect(slider, &QSlider::valueChanged, this, &MainWindow::onProximityDistanceChanged);
 
     return widget;
 }
@@ -581,6 +639,18 @@ void MainWindow::onFocusDistanceChanged(int value) {
 void MainWindow::onApertureSizeChanged(int value) {
     double v = value * 0.1;
     cellFlowWidget->setApertureSize(v);
+}
+
+// Proximity graph slots
+void MainWindow::onProximityDistanceChanged(int value) {
+    // Linear scaling: slider 0-100 → distance 0-500
+    // Step size of 5 for fine control
+    double v = value * 5.0;  // step = 500 / 100
+    cellFlowWidget->setProximityDistance(v);
+}
+
+void MainWindow::onMaxConnectionsChanged(int value) {
+    cellFlowWidget->setMaxConnectionsPerParticle(value);
 }
 
 void MainWindow::onEffectChanged(int index) {

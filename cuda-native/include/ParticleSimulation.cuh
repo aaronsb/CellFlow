@@ -55,7 +55,16 @@ public:
     // Get/Set radioByType values
     std::vector<float> getRadioByType() const;
     void setRadioByTypeValue(int index, float value);
-    
+
+    // Proximity graph - GPU rendering with CUDA-OpenGL interop
+    void generateProximityGraph(
+        unsigned int openglVBO,
+        int& outVertexCount,
+        float proximityDistance,
+        int maxConnectionsPerParticle,
+        const std::vector<ParticleColor>& particleColors
+    );
+
 private:
     int particleCount;
     int numParticleTypes;
@@ -115,6 +124,17 @@ __global__ void moveParticlesKernel(
     float canvasWidth,
     float canvasHeight,
     float canvasDepth
+);
+
+__global__ void generateProximityGraphKernel(
+    const Particle* particles,
+    int particleCount,
+    float proximityDistanceSq,
+    int maxConnectionsPerParticle,
+    const ParticleColor* particleColors,
+    int numParticleTypes,
+    float* lineVertices,
+    int* vertexCount
 );
 
 #endif // PARTICLE_SIMULATION_CUH
